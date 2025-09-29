@@ -6,7 +6,8 @@ data class Provider(
     val key: String,
     val displayName: String,
     val urlTemplate: String,
-    val overrideUserAgent: String? = null
+    val overrideUserAgent: String? = null,
+    val homeUrl: String? = null
 ) {
     fun buildUrl(query: String): String {
         val enc = URLEncoder.encode(query, Charsets.UTF_8.name())
@@ -14,23 +15,29 @@ data class Provider(
             .replace("{QUERY}", enc, false)
             .replace("{query}", enc, false)
     }
+
+    /** Prefer explicit homeUrl, else fall back to "search home" (empty query). */
+    fun home(): String = homeUrl ?: buildUrl("")
 }
 
 val MVP_PROVIDERS = listOf(
     Provider(
         key = "blinkit",
         displayName = "Blinkit",
-        urlTemplate = "https://blinkit.com/s/?q={QUERY}"
+        urlTemplate = "https://blinkit.com/s/?q={QUERY}",
+        homeUrl = "https://blinkit.com/"
     ),
     Provider(
         key = "zepto",
         displayName = "Zepto",
-        urlTemplate = "https://www.zeptonow.com/search?query={QUERY}"
+        urlTemplate = "https://www.zeptonow.com/search?query={QUERY}",
+        homeUrl = "https://www.zeptonow.com/"
     ),
     Provider(
         key = "instamart",
         displayName = "Instamart",
         urlTemplate = "https://www.swiggy.com/instamart/search?custom_back=true&query={QUERY}",
+        homeUrl = "https://www.swiggy.com/instamart",
         overrideUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
     )
 )

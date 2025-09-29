@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -39,15 +41,15 @@ fun MVPCompareScreen() {
     val providers = remember { MVP_PROVIDERS } // Blinkit, Zepto, Instamart
     val context = LocalContext.current
 
-    // 1) Text field state (what the user is typing)
+    // 1) What the user is typing
     var queryField by remember { mutableStateOf(TextFieldValue("tea")) }
-    // 2) Applied query used by WebViews (set ONLY when Search is tapped)
+    // 2) We apply this query to all panes only when Search is clicked
     var appliedQuery by remember { mutableStateOf("tea") }
 
-    // Default zoom 50%, allow 5–200%
+    // Zoom 5–200%, default 50%
     var zoom by remember { mutableStateOf(50) }
 
-    // Runtime location permission + site prompt
+    // Location permission & site prompt
     var pendingGeoResponder by remember { mutableStateOf<((Boolean) -> Unit)?>(null) }
     var siteRequestingGeo by remember { mutableStateOf<String?>(null) }
     val locationPermission = rememberLauncherForActivityResult(
@@ -60,6 +62,20 @@ fun MVPCompareScreen() {
         }
     }
 
+    // Per-pane state maps (url, desktop mode, reload token)
+    val paneUrls = remember { mutableStateMapOf<String, String>() }
+    val paneDesktop = remember { mutableStateMapOf<String, Boolean>() }
+    val paneReload = remember { mutableStateMapOf<String, Int>() }
+
+    // Initialize per-pane URL on first composition
+    LaunchedEffect(Unit) {
+        providers.forEach { p ->
+            paneUrls.putIfAbsent(p.key, p.buildUrl(appliedQuery))
+            paneDesktop.putIfAbsent(p.key, false)
+            paneReload.putIfAbsent(p.key, 0)
+        }
+    }
+
     Scaffold(
         topBar = { TopAppBar(title = { Text("Open Compares — MVP") }) }
     ) { padding ->
@@ -69,15 +85,18 @@ fun MVPCompareScreen() {
             Row(Modifier.fillMaxWidth().padding(8.dp)) {
                 OutlinedTextField(
                     value = queryField,
-                    onValueChange = { queryField = it }, // no web reload on typing
+                    onValueChange = { queryField = it },
                     label = { Text("Search") },
                     modifier = Modifier.weight(1f),
                     singleLine = true
                 )
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = {
-                    // Apply the search only when clicked
+                    // Apply the query to ALL panes at once
                     appliedQuery = queryField.text
+                    providers.forEach { p ->
+                        paneUrls[p.key] = p.buildUrl(appliedQuery)
+                    }
                 }) { Text("Search") }
             }
 
@@ -94,7 +113,7 @@ fun MVPCompareScreen() {
                 )
             }
 
-            // Two-column grid, each pane scrolls independently
+            // Two-column grid; each pane has its own menu + WebView
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
                 contentPadding = PaddingValues(8.dp),
@@ -103,34 +122,88 @@ fun MVPCompareScreen() {
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(providers, key = { it.key }) { provider ->
-                    // Rebuild pane URL ONLY when (provider changes OR appliedQuery changes)
-                    var currentUrl by remember(provider.key, appliedQuery) {
-                        mutableStateOf(provider.buildUrl(appliedQuery))
-                    }
+                    val currentUrl = paneUrls[provider.key] ?: provider.buildUrl(appliedQuery)
+                    val desktopMode = paneDesktop[provider.key] ?: false
+                    val reloadToken = paneReload[provider.key] ?: 0
+
+                    var menuOpen by remember { mutableStateOf(false) }
 
                     Card(Modifier.fillMaxWidth().height(650.dp)) {
                         Column(Modifier.fillMaxSize()) {
-                            // Header: provider + Open
+                            // Header: provider + overflow (Open, Home, Desktop mode)
                             Row(
                                 Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(provider.displayName, style = MaterialTheme.typography.titleMedium)
-                                TextButton(onClick = {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl))
-                                    context.startActivity(intent)
-                                }) { Text("Open") }
+
+                                Box {
+                                    IconButton(onClick = { menuOpen = true }) {
+                                        Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                                    }
+                                    DropdownMenu(
+                                        expanded = menuOpen,
+                                        onDismissRequest = { menuOpen = false }
+                                    ) {
+                                        // Open current URL externally
+                                        DropdownMenuItem(
+                                            text = { Text("Open") },
+                                            onClick = {
+                                                menuOpen = false
+                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl))
+                                                context.startActivity(intent)
+                                            }
+                                        )
+                                        // Home: set this pane's URL to site home
+                                        DropdownMenuItem(
+                                            text = { Text("Home") },
+                                            onClick = {
+                                                menuOpen = false
+                                                paneUrls[provider.key] = provider.home()
+                                            }
+                                        )
+                                        // Desktop mode toggle (checkbox)
+                                        DropdownMenuItem(
+                                            text = {
+                                                Row(
+                                                    Modifier.fillMaxWidth(),
+                                                    horizontalArrangement = Arrangement.SpaceBetween
+                                                ) {
+                                                    Text("Desktop mode")
+                                                    Checkbox(
+                                                        checked = desktopMode,
+                                                        onCheckedChange = { checked ->
+                                                            paneDesktop[provider.key] = checked
+                                                            // Force reload of the same URL with new UA
+                                                            paneReload[provider.key] = (paneReload[provider.key] ?: 0) + 1
+                                                        }
+                                                    )
+                                                }
+                                            },
+                                            onClick = {
+                                                paneDesktop[provider.key] = !desktopMode
+                                                paneReload[provider.key] = (paneReload[provider.key] ?: 0) + 1
+                                                menuOpen = false
+                                            }
+                                        )
+                                    }
+                                }
                             }
 
-                            // Body: scrollable WebView (via touch-intercept fix)
+                            // Body: WebView bound to the pane's currentUrl
                             Box(Modifier.fillMaxSize().padding(8.dp)) {
                                 OpenComparesWebView(
                                     provider = provider,
-                                    query = appliedQuery,          // <- use applied query only
-                                    zoomPercent = zoom,            // 5–200, default 50
-                                    onUrlChanged = { currentUrl = it },
+                                    targetUrl = currentUrl,           // <- explicit URL (search or home)
+                                    zoomPercent = zoom,
+                                    desktopMode = desktopMode,
+                                    reloadToken = reloadToken,
+                                    onUrlChanged = { newUrl ->
+                                        // Keep the tracked URL in sync with actual navigations
+                                        paneUrls[provider.key] = newUrl
+                                    },
                                     onError = {
-                                        // TODO: show Snackbar/Toast if you like
+                                        // TODO: show Snackbar/Toast if desired
                                     },
                                     onGeoPrompt = { origin, respond ->
                                         locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
