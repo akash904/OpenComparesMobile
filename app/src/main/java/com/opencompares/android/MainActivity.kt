@@ -16,10 +16,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,6 +43,43 @@ fun App() {
     MaterialTheme {
         MVPCompareScreen()
     }
+}
+
+@Composable
+private fun CompactSearchField(
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(8.dp)
+    val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+    val containerColor = MaterialTheme.colorScheme.surface
+
+    BasicTextField(
+        value = value,
+        onValueChange = onValueChange,
+        singleLine = true,
+        textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
+        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+        modifier = modifier
+            .height(32.dp)
+            .background(containerColor, shape)
+            .border(1.dp, borderColor, shape)
+            .padding(horizontal = 8.dp),
+        decorationBox = { innerTextField ->
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.CenterStart) {
+                if (value.text.isEmpty()) {
+                    Text(
+                        placeholder,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                innerTextField()
+            }
+        }
+    )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -77,48 +124,106 @@ fun MVPCompareScreen() {
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Open Compares — MVP") }) }
+        topBar = { 
+            TopAppBar(
+                title = { 
+                    Text(
+                        "Open Compares", 
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            fontWeight = FontWeight.Bold
+                        )
+                    ) 
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            ) 
+        }
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
 
-            // Shared search bar (typing does NOT trigger search)
-            Row(Modifier.fillMaxWidth().padding(8.dp)) {
-                OutlinedTextField(
-                    value = queryField,
-                    onValueChange = { queryField = it },
-                    label = { Text("Search") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true
-                )
-                Spacer(Modifier.width(8.dp))
-                Button(onClick = {
-                    // Apply the query to ALL panes at once
-                    appliedQuery = queryField.text
-                    providers.forEach { p ->
-                        paneUrls[p.key] = p.buildUrl(appliedQuery)
-                    }
-                }) { Text("Search") }
-            }
-
-            // Global zoom: 5–200%
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
+            // Ultra-compact search bar
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
             ) {
-                Text("Zoom: ${zoom}%")
-                Slider(
-                    value = zoom.toFloat(),
-                    onValueChange = { zoom = it.toInt().coerceIn(5, 200) },
-                    valueRange = 5f..200f
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    CompactSearchField(
+                        value = queryField,
+                        onValueChange = { queryField = it },
+                        placeholder = "Search...",
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Button(
+                        onClick = {
+                            appliedQuery = queryField.text
+                            providers.forEach { p ->
+                                paneUrls[p.key] = p.buildUrl(appliedQuery)
+                            }
+                        },
+                        modifier = Modifier.height(32.dp)
+                    ) { 
+                        Text(
+                            "Search", 
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontWeight = FontWeight.Medium
+                            )
+                        ) 
+                    }
+                }
             }
 
-            // Two-column grid; each pane has its own menu + WebView
+            // Ultra-compact zoom control
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        "Zoom: ${zoom}%",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Medium
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Slider(
+                        value = zoom.toFloat(),
+                        onValueChange = { zoom = it.toInt().coerceIn(5, 200) },
+                        valueRange = 5f..200f,
+                        modifier = Modifier.width(80.dp)
+                    )
+                }
+            }
+
+            // Ultra-thin divider
+            HorizontalDivider(
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+            )
+
+            // Ultra-compact two-column grid
             LazyVerticalGrid(
                 columns = GridCells.Fixed(2),
-                contentPadding = PaddingValues(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
                 items(providers, key = { it.key }) { provider ->
@@ -128,18 +233,37 @@ fun MVPCompareScreen() {
 
                     var menuOpen by remember { mutableStateOf(false) }
 
-                    Card(Modifier.fillMaxWidth().height(650.dp)) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth().height(400.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
                         Column(Modifier.fillMaxSize()) {
-                            // Header: provider + overflow (Open, Home, Desktop mode)
+                            // Ultra-compact header with provider name and menu
                             Row(
-                                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(provider.displayName, style = MaterialTheme.typography.titleMedium)
+                                Text(
+                                    provider.displayName, 
+                                    style = MaterialTheme.typography.labelLarge.copy(
+                                        fontWeight = FontWeight.SemiBold
+                                    ),
+                                    color = MaterialTheme.colorScheme.primary
+                                )
 
                                 Box {
-                                    IconButton(onClick = { menuOpen = true }) {
-                                        Icon(Icons.Filled.MoreVert, contentDescription = "More")
+                                    IconButton(
+                                        onClick = { menuOpen = true },
+                                        modifier = Modifier.size(28.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Filled.MoreVert, 
+                                            contentDescription = "More options",
+                                            modifier = Modifier.size(16.dp)
+                                        )
                                     }
                                     DropdownMenu(
                                         expanded = menuOpen,
@@ -190,8 +314,8 @@ fun MVPCompareScreen() {
                                 }
                             }
 
-                            // Body: WebView bound to the pane's currentUrl
-                            Box(Modifier.fillMaxSize().padding(8.dp)) {
+                            // Ultra-compact WebView container
+                            Box(Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp)) {
                                 OpenComparesWebView(
                                     provider = provider,
                                     targetUrl = currentUrl,           // <- explicit URL (search or home)
