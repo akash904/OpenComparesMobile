@@ -14,6 +14,8 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -96,6 +98,9 @@ fun MVPCompareScreen() {
     // Zoom 5–200%, default 50%
     var zoom by remember { mutableStateOf(50) }
 
+    // Which pane (by provider.key) is fullscreen; null means grid view
+    var fullScreenPane by remember { mutableStateOf<String?>(null) }
+
     // Location permission & site prompt
     var pendingGeoResponder by remember { mutableStateOf<((Boolean) -> Unit)?>(null) }
     var siteRequestingGeo by remember { mutableStateOf<String?>(null) }
@@ -143,7 +148,7 @@ fun MVPCompareScreen() {
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
 
-            // Ultra-compact search bar
+            // Combined search and zoom control in single row
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -154,15 +159,20 @@ fun MVPCompareScreen() {
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
+                    // Search field (takes most space)
                     CompactSearchField(
                         value = queryField,
                         onValueChange = { queryField = it },
                         placeholder = "Search...",
                         modifier = Modifier.weight(1f)
                     )
-                    Spacer(Modifier.width(6.dp))
+                    
+                    Spacer(Modifier.width(8.dp))
+                    
+                    // Search button
                     Button(
                         onClick = {
                             appliedQuery = queryField.text
@@ -179,23 +189,10 @@ fun MVPCompareScreen() {
                             )
                         ) 
                     }
-                }
-            }
-
-            // Ultra-compact zoom control
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
-                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                    
+                    Spacer(Modifier.width(12.dp))
+                    
+                    // Zoom label
                     Text(
                         "Zoom: ${zoom}%",
                         style = MaterialTheme.typography.labelSmall.copy(
@@ -203,6 +200,10 @@ fun MVPCompareScreen() {
                         ),
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    
+                    Spacer(Modifier.width(4.dp))
+                    
+                    // Zoom slider (compact)
                     Slider(
                         value = zoom.toFloat(),
                         onValueChange = { zoom = it.toInt().coerceIn(5, 200) },
@@ -218,15 +219,143 @@ fun MVPCompareScreen() {
                 color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
             )
 
-            // Ultra-compact two-column grid
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(2),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier.fillMaxSize()
-            ) {
-                items(providers, key = { it.key }) { provider ->
+            if (fullScreenPane == null) {
+                // Ultra-compact two-column grid
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.fillMaxSize()
+                ) {
+                    items(providers, key = { it.key }) { provider ->
+                        val currentUrl = paneUrls[provider.key] ?: provider.buildUrl(appliedQuery)
+                        val desktopMode = paneDesktop[provider.key] ?: false
+                        val reloadToken = paneReload[provider.key] ?: 0
+
+                        var menuOpen by remember { mutableStateOf(false) }
+
+                        Card(
+                            modifier = Modifier.fillMaxWidth().height(400.dp),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                        ) {
+                            Column(Modifier.fillMaxSize()) {
+                                // Ultra-compact header with provider name and menu
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        provider.displayName, 
+                                        style = MaterialTheme.typography.labelLarge.copy(
+                                            fontWeight = FontWeight.SemiBold
+                                        ),
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(onClick = { fullScreenPane = provider.key }, modifier = Modifier.size(28.dp)) {
+                                            Icon(
+                                                Icons.Filled.Fullscreen,
+                                                contentDescription = "Enter fullscreen",
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                        Box {
+                                            IconButton(
+                                                onClick = { menuOpen = true },
+                                                modifier = Modifier.size(28.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Filled.MoreVert, 
+                                                    contentDescription = "More options",
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                            DropdownMenu(
+                                                expanded = menuOpen,
+                                                onDismissRequest = { menuOpen = false }
+                                            ) {
+                                                // Open current URL externally
+                                                DropdownMenuItem(
+                                                    text = { Text("Open") },
+                                                    onClick = {
+                                                        menuOpen = false
+                                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl))
+                                                        context.startActivity(intent)
+                                                    }
+                                                )
+                                                // Home: set this pane's URL to site home
+                                                DropdownMenuItem(
+                                                    text = { Text("Home") },
+                                                    onClick = {
+                                                        menuOpen = false
+                                                        paneUrls[provider.key] = provider.home()
+                                                    }
+                                                )
+                                                // Desktop mode toggle (checkbox)
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Row(
+                                                            Modifier.fillMaxWidth(),
+                                                            horizontalArrangement = Arrangement.SpaceBetween
+                                                        ) {
+                                                            Text("Desktop mode")
+                                                            Checkbox(
+                                                                checked = desktopMode,
+                                                                onCheckedChange = { checked ->
+                                                                    paneDesktop[provider.key] = checked
+                                                                    // Force reload of the same URL with new UA
+                                                                    paneReload[provider.key] = (paneReload[provider.key] ?: 0) + 1
+                                                                }
+                                                            )
+                                                        }
+                                                    },
+                                                    onClick = {
+                                                        paneDesktop[provider.key] = !desktopMode
+                                                        paneReload[provider.key] = (paneReload[provider.key] ?: 0) + 1
+                                                        menuOpen = false
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Ultra-compact WebView container
+                                Box(Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp)) {
+                                    OpenComparesWebView(
+                                        provider = provider,
+                                        targetUrl = currentUrl,           // <- explicit URL (search or home)
+                                        zoomPercent = zoom,
+                                        desktopMode = desktopMode,
+                                        reloadToken = reloadToken,
+                                        onUrlChanged = { newUrl ->
+                                            // Keep the tracked URL in sync with actual navigations
+                                            paneUrls[provider.key] = newUrl
+                                        },
+                                        onError = {
+                                            // TODO: show Snackbar/Toast if desired
+                                        },
+                                        onGeoPrompt = { origin, respond ->
+                                            locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+                                            pendingGeoResponder = respond
+                                            siteRequestingGeo = origin
+                                        },
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Fullscreen single pane view
+                val provider = providers.firstOrNull { it.key == fullScreenPane }
+                if (provider != null) {
                     val currentUrl = paneUrls[provider.key] ?: provider.buildUrl(appliedQuery)
                     val desktopMode = paneDesktop[provider.key] ?: false
                     val reloadToken = paneReload[provider.key] ?: 0
@@ -234,11 +363,13 @@ fun MVPCompareScreen() {
                     var menuOpen by remember { mutableStateOf(false) }
 
                     Card(
-                        modifier = Modifier.fillMaxWidth().height(400.dp),
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
                         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                     ) {
                         Column(Modifier.fillMaxSize()) {
-                            // Ultra-compact header with provider name and menu
+                            // Header with exit fullscreen
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -247,88 +378,90 @@ fun MVPCompareScreen() {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    provider.displayName, 
+                                    provider.displayName,
                                     style = MaterialTheme.typography.labelLarge.copy(
                                         fontWeight = FontWeight.SemiBold
                                     ),
                                     color = MaterialTheme.colorScheme.primary
                                 )
 
-                                Box {
-                                    IconButton(
-                                        onClick = { menuOpen = true },
-                                        modifier = Modifier.size(28.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Filled.MoreVert, 
-                                            contentDescription = "More options",
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(onClick = { fullScreenPane = null }, modifier = Modifier.size(28.dp)) {
+        						Icon(
+                                            Icons.Filled.FullscreenExit,
+                                            contentDescription = "Exit fullscreen",
                                             modifier = Modifier.size(16.dp)
                                         )
                                     }
-                                    DropdownMenu(
-                                        expanded = menuOpen,
-                                        onDismissRequest = { menuOpen = false }
-                                    ) {
-                                        // Open current URL externally
-                                        DropdownMenuItem(
-                                            text = { Text("Open") },
-                                            onClick = {
-                                                menuOpen = false
-                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl))
-                                                context.startActivity(intent)
-                                            }
-                                        )
-                                        // Home: set this pane's URL to site home
-                                        DropdownMenuItem(
-                                            text = { Text("Home") },
-                                            onClick = {
-                                                menuOpen = false
-                                                paneUrls[provider.key] = provider.home()
-                                            }
-                                        )
-                                        // Desktop mode toggle (checkbox)
-                                        DropdownMenuItem(
-                                            text = {
-                                                Row(
-                                                    Modifier.fillMaxWidth(),
-                                                    horizontalArrangement = Arrangement.SpaceBetween
-                                                ) {
-                                                    Text("Desktop mode")
-                                                    Checkbox(
-                                                        checked = desktopMode,
-                                                        onCheckedChange = { checked ->
-                                                            paneDesktop[provider.key] = checked
-                                                            // Force reload of the same URL with new UA
-                                                            paneReload[provider.key] = (paneReload[provider.key] ?: 0) + 1
-                                                        }
-                                                    )
+                                    Box {
+                                        IconButton(
+                                            onClick = { menuOpen = true },
+                                            modifier = Modifier.size(28.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Filled.MoreVert,
+                                                contentDescription = "More options",
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                        DropdownMenu(
+                                            expanded = menuOpen,
+                                            onDismissRequest = { menuOpen = false }
+                                        ) {
+                                            DropdownMenuItem(
+                                                text = { Text("Open") },
+                                                onClick = {
+                                                    menuOpen = false
+                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(currentUrl))
+                                                    context.startActivity(intent)
                                                 }
-                                            },
-                                            onClick = {
-                                                paneDesktop[provider.key] = !desktopMode
-                                                paneReload[provider.key] = (paneReload[provider.key] ?: 0) + 1
-                                                menuOpen = false
-                                            }
-                                        )
+                                            )
+                                            DropdownMenuItem(
+                                                text = { Text("Home") },
+                                                onClick = {
+                                                    menuOpen = false
+                                                    paneUrls[provider.key] = provider.home()
+                                                }
+                                            )
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Row(
+                                                        Modifier.fillMaxWidth(),
+                                                        horizontalArrangement = Arrangement.SpaceBetween
+                                                    ) {
+                                                        Text("Desktop mode")
+                                                        Checkbox(
+                                                            checked = desktopMode,
+                                                            onCheckedChange = { checked ->
+                                                                paneDesktop[provider.key] = checked
+                                                                paneReload[provider.key] = (paneReload[provider.key] ?: 0) + 1
+                                                            }
+                                                        )
+                                                    }
+                                                },
+                                                onClick = {
+                                                    paneDesktop[provider.key] = !desktopMode
+                                                    paneReload[provider.key] = (paneReload[provider.key] ?: 0) + 1
+                                                    menuOpen = false
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
 
-                            // Ultra-compact WebView container
+                            // Fullscreen WebView fills all
                             Box(Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp)) {
                                 OpenComparesWebView(
                                     provider = provider,
-                                    targetUrl = currentUrl,           // <- explicit URL (search or home)
+                                    targetUrl = currentUrl,
                                     zoomPercent = zoom,
                                     desktopMode = desktopMode,
                                     reloadToken = reloadToken,
                                     onUrlChanged = { newUrl ->
-                                        // Keep the tracked URL in sync with actual navigations
                                         paneUrls[provider.key] = newUrl
                                     },
-                                    onError = {
-                                        // TODO: show Snackbar/Toast if desired
-                                    },
+                                    onError = { },
                                     onGeoPrompt = { origin, respond ->
                                         locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
                                         pendingGeoResponder = respond
