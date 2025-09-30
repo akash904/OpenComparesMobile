@@ -12,10 +12,16 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.material.icons.filled.Store
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -101,6 +107,16 @@ fun MVPCompareScreen() {
     // Which pane (by provider.key) is fullscreen; null means grid view
     var fullScreenPane by remember { mutableStateOf<String?>(null) }
 
+    // Marketplaces selection dialog and state
+    var showMarketplaceDialog by remember { mutableStateOf(false) }
+    var selectedProviders by remember { mutableStateOf(mutableSetOf("blinkit", "zepto", "instamart")) }
+    var tempMarketplaceSelection by remember { mutableStateOf(mutableSetOf<String>()) }
+    LaunchedEffect(showMarketplaceDialog) {
+        if (showMarketplaceDialog) {
+            tempMarketplaceSelection = selectedProviders.toMutableSet()
+        }
+    }
+
     // Location permission & site prompt
     var pendingGeoResponder by remember { mutableStateOf<((Boolean) -> Unit)?>(null) }
     var siteRequestingGeo by remember { mutableStateOf<String?>(null) }
@@ -133,13 +149,71 @@ fun MVPCompareScreen() {
     Scaffold(
         topBar = { 
             TopAppBar(
-                title = { 
-                    Text(
-                        "Open Compares", 
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Bold
+                modifier = Modifier.height(40.dp),
+                title = {
+                    Box(
+                        modifier = Modifier.fillMaxHeight(),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        Text(
+                            "Open Compares",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold
+                            )
                         )
-                    ) 
+                    }
+                },
+                actions = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
+                            IconButton(onClick = {
+                                val newZoom = (zoom - 5).coerceIn(5, 100)
+                                zoom = newZoom
+                                if (fullScreenPane == null) {
+                                    selectedProviders.forEach { key -> paneZoom[key] = newZoom }
+                                } else {
+                                    val key = fullScreenPane
+                                    if (key != null) paneZoom[key] = newZoom
+                                }
+                            }, modifier = Modifier.size(28.dp)) {
+                                Icon(
+                                    imageVector = Icons.Filled.ZoomOut,
+                                    contentDescription = "Zoom out",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                        Box(modifier = Modifier
+                            .fillMaxHeight()
+                            .padding(horizontal = 4.dp), contentAlignment = Alignment.Center) {
+                            LinearProgressIndicator(
+                                progress = { zoom / 100f },
+                                modifier = Modifier.width(64.dp).height(4.dp),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                trackColor = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f)
+                            )
+                        }
+                        CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
+                            IconButton(onClick = {
+                                val newZoom = (zoom + 5).coerceIn(5, 100)
+                                zoom = newZoom
+                                if (fullScreenPane == null) {
+                                    selectedProviders.forEach { key -> paneZoom[key] = newZoom }
+                                } else {
+                                    val key = fullScreenPane
+                                    if (key != null) paneZoom[key] = newZoom
+                                }
+                            }, modifier = Modifier.size(28.dp)) {
+                                Icon(
+                                    imageVector = Icons.Filled.ZoomIn,
+                                    contentDescription = "Zoom in",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -173,13 +247,15 @@ fun MVPCompareScreen() {
                     )
                     
                     Spacer(Modifier.width(8.dp))
-                    
+
                     // Search button
                     Button(
                         onClick = {
                             appliedQuery = queryField.text
                             providers.forEach { p ->
-                                paneUrls[p.key] = p.buildUrl(appliedQuery)
+                                if (selectedProviders.contains(p.key)) {
+                                    paneUrls[p.key] = p.buildUrl(appliedQuery)
+                                }
                             }
                         },
                         modifier = Modifier.height(32.dp)
@@ -193,34 +269,26 @@ fun MVPCompareScreen() {
                     }
                     
                     Spacer(Modifier.width(12.dp))
+                    // Zoom controls moved to TopAppBar
                     
-                    // Zoom label
-                    Text(
-                        "Zoom: ${zoom}%",
-                        style = MaterialTheme.typography.labelSmall.copy(
-                            fontWeight = FontWeight.Medium
-                        ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    // Marketplaces button
+                    CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
+                        Button(
+                            onClick = { showMarketplaceDialog = true },
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Store,
+                                contentDescription = "Marketplaces",
+                                modifier = Modifier.size(16.dp)
+                            )
+                            
+                        }
+                    }
+
+                    Spacer(Modifier.width(8.dp))
+
                     
-                    Spacer(Modifier.width(4.dp))
-                    
-                    // Zoom slider (compact)
-                    Slider(
-                        value = zoom.toFloat(),
-                        onValueChange = { v ->
-                            val newZoom = v.toInt().coerceIn(5, 100)
-                            zoom = newZoom
-                            if (fullScreenPane == null) {
-                                providers.forEach { p -> paneZoom[p.key] = newZoom }
-                            } else {
-                                val key = fullScreenPane
-                                if (key != null) paneZoom[key] = newZoom
-                            }
-                        },
-                        valueRange = 5f..100f,
-                        modifier = Modifier.width(80.dp)
-                    )
                 }
             }
 
@@ -232,6 +300,12 @@ fun MVPCompareScreen() {
 
             if (fullScreenPane == null) {
                 // Ultra-compact two-column grid
+                val visibleProviders = providers.filter { selectedProviders.contains(it.key) }
+                if (visibleProviders.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("No marketplaces selected", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
@@ -239,7 +313,7 @@ fun MVPCompareScreen() {
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(providers, key = { it.key }) { provider ->
+                    items(visibleProviders, key = { it.key }) { provider ->
                         val currentUrl = paneUrls[provider.key] ?: provider.buildUrl(appliedQuery)
                         val desktopMode = paneDesktop[provider.key] ?: false
                         val reloadToken = paneReload[provider.key] ?: 0
@@ -364,9 +438,10 @@ fun MVPCompareScreen() {
                         }
                     }
                 }
+                }
             } else {
                 // Fullscreen single pane view
-                val provider = providers.firstOrNull { it.key == fullScreenPane }
+                val provider = providers.firstOrNull { it.key == fullScreenPane && selectedProviders.contains(it.key) }
                 if (provider != null) {
                     val currentUrl = paneUrls[provider.key] ?: provider.buildUrl(appliedQuery)
                     val desktopMode = paneDesktop[provider.key] ?: false
@@ -486,6 +561,51 @@ fun MVPCompareScreen() {
                         }
                     }
                 }
+            }
+            // Marketplaces selection dialog
+            if (showMarketplaceDialog) {
+                AlertDialog(
+                    onDismissRequest = { showMarketplaceDialog = false },
+                    title = { Text("Marketplaces") },
+                    text = {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 360.dp)
+                                .verticalScroll(rememberScrollState())
+                        ) {
+                            providers.forEach { p ->
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(p.displayName)
+                                    Checkbox(
+                                        checked = tempMarketplaceSelection.contains(p.key),
+                                        onCheckedChange = { checked ->
+                                            val next = tempMarketplaceSelection.toMutableSet()
+                                            if (checked) next.add(p.key) else next.remove(p.key)
+                                            tempMarketplaceSelection = next
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            selectedProviders = tempMarketplaceSelection.toMutableSet()
+                            if (fullScreenPane != null && !selectedProviders.contains(fullScreenPane!!)) {
+                                fullScreenPane = null
+                            }
+                            showMarketplaceDialog = false
+                        }) { Text("Save") }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showMarketplaceDialog = false }) { Text("Cancel") }
+                    }
+                )
             }
 
             // Site-level geolocation dialog

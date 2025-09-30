@@ -38,6 +38,8 @@ fun OpenComparesWebView(
     modifier: Modifier = Modifier
 ) {
     val systemUa = remember { mutableStateOf<String?>(null) }
+    // A modern desktop Chrome UA to request desktop sites reliably
+    val desktopUaString = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     // Track last applied values to avoid redundant work in updates
     val lastAppliedZoomPercent = remember { mutableStateOf<Int?>(null) }
     val lastAppliedReloadToken = remember { mutableStateOf<Int?>(null) }
@@ -85,9 +87,9 @@ fun OpenComparesWebView(
                 // Capture system UA once
                 if (systemUa.value == null) systemUa.value = settings.userAgentString
 
-                // Apply UA
+                // Apply UA (true desktop UA when desktopMode is enabled)
                 settings.userAgentString = when {
-                    desktopMode -> systemUa.value ?: settings.userAgentString
+                    desktopMode -> desktopUaString
                     provider.overrideUserAgent != null -> provider.overrideUserAgent
                     else -> systemUa.value ?: settings.userAgentString
                 }
@@ -154,7 +156,7 @@ fun OpenComparesWebView(
             // Apply UA on updates (e.g., desktopMode toggled)
             val sys = systemUa.value ?: wv.settings.userAgentString
             val desiredUa = when {
-                desktopMode -> sys
+                desktopMode -> desktopUaString
                 provider.overrideUserAgent != null -> provider.overrideUserAgent
                 else -> sys
             }
