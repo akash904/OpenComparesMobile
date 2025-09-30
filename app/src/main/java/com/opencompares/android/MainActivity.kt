@@ -151,7 +151,9 @@ fun MVPCompareScreen() {
     Scaffold(
         topBar = { 
             TopAppBar(
-                modifier = Modifier.height(50.dp),
+                modifier = Modifier
+                    .statusBarsPadding()
+                    .height(50.dp),
                 title = {
                     Box(
                         modifier = Modifier.fillMaxHeight(),
