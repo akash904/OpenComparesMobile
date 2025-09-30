@@ -95,7 +95,7 @@ fun MVPCompareScreen() {
     // 2) We apply this query to all panes only when Search is clicked
     var appliedQuery by remember { mutableStateOf("tea") }
 
-    // Zoom 5–200%, default 50%
+    // Zoom 5–100%, default 50%
     var zoom by remember { mutableStateOf(50) }
 
     // Which pane (by provider.key) is fullscreen; null means grid view
@@ -208,8 +208,17 @@ fun MVPCompareScreen() {
                     // Zoom slider (compact)
                     Slider(
                         value = zoom.toFloat(),
-                        onValueChange = { zoom = it.toInt().coerceIn(5, 200) },
-                        valueRange = 5f..200f,
+                        onValueChange = { v ->
+                            val newZoom = v.toInt().coerceIn(5, 100)
+                            zoom = newZoom
+                            if (fullScreenPane == null) {
+                                providers.forEach { p -> paneZoom[p.key] = newZoom }
+                            } else {
+                                val key = fullScreenPane
+                                if (key != null) paneZoom[key] = newZoom
+                            }
+                        },
+                        valueRange = 5f..100f,
                         modifier = Modifier.width(80.dp)
                     )
                 }

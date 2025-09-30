@@ -42,6 +42,6 @@ val MVP_PROVIDERS = listOf(
         urlTemplate = "https://www.swiggy.com/instamart/search?custom_back=true&query={QUERY}",
         homeUrl = "https://www.swiggy.com/instamart",
         overrideUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-        defaultZoom = 90
+        defaultZoom = 100
     )
 )

@@ -38,6 +38,9 @@ fun OpenComparesWebView(
     modifier: Modifier = Modifier
 ) {
     val systemUa = remember { mutableStateOf<String?>(null) }
+    // Track last applied values to avoid redundant work in updates
+    val lastAppliedZoomPercent = remember { mutableStateOf<Int?>(null) }
+    val lastAppliedReloadToken = remember { mutableStateOf<Int?>(null) }
 
     AndroidView(
         modifier = modifier,
@@ -55,6 +58,9 @@ fun OpenComparesWebView(
                 settings.useWideViewPort = true
                 settings.loadWithOverviewMode = true
                 settings.mediaPlaybackRequiresUserGesture = false
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    settings.setOffscreenPreRaster(true)
+                }
                 
                 // Apply initial zoom settings
                 settings.setSupportZoom(true)
@@ -99,9 +105,10 @@ fun OpenComparesWebView(
                         super.onPageFinished(view, url)
                         url?.let(onUrlChanged)
                         
-                        // Apply zoom using CSS zoom
+                        // Apply zoom using CSS zoom (record last applied)
                         val scale = zoomPercent / 100.0
                         evaluateJavascript("document.body.style.zoom = '$scale';", null)
+                        lastAppliedZoomPercent.value = zoomPercent
                     }
 
                     override fun onReceivedError(
@@ -131,9 +138,6 @@ fun OpenComparesWebView(
                         isUserGesture: Boolean,
                         resultMsg: android.os.Message?
                     ): Boolean {
-
-                        val scale = zoomPercent / 100.0
-                        evaluateJavascript("document.body.style.zoom = '$scale';", null)
                         // Try to extract URL from the transport and load it here
                         val transport = resultMsg?.obj as? WebView.WebViewTransport
                         transport?.webView = view
@@ -142,10 +146,7 @@ fun OpenComparesWebView(
                     }
                 }
 
-                // Apply zoom immediately after WebView creation
-                val scale = zoomPercent / 100.0
-                evaluateJavascript("document.body.style.zoom = '$scale';", null)
-                
+                // Initial zoom will be applied after first page load
                 loadUrl(targetUrl)
             }
         },
@@ -166,16 +167,19 @@ fun OpenComparesWebView(
                 wv.loadUrl(targetUrl)
             }
 
-            // Update zoom using CSS zoom
-            val scale = zoomPercent / 100.0
-            wv.evaluateJavascript("document.body.style.zoom = '$scale';", null)
+            // Update zoom only when it changes
+            if (lastAppliedZoomPercent.value != zoomPercent) {
+                val scale = zoomPercent / 100.0
+                wv.evaluateJavascript("document.body.style.zoom = '$scale';", null)
+                lastAppliedZoomPercent.value = zoomPercent
+            }
 
-            // Force reload if requested (even if URL is same)
-            // Reload occurs after UA/zoom applied above.
-            if (reloadToken != 0) {
-                // Use evaluateJavascript ping to avoid infinite reload in the same frame;
-                // or simply call reload() which keeps the same URL.
-                wv.reload()
+            // Force reload only when the token changes
+            if (lastAppliedReloadToken.value != reloadToken) {
+                if (reloadToken != 0) {
+                    wv.reload()
+                }
+                lastAppliedReloadToken.value = reloadToken
             }
         }
     )
