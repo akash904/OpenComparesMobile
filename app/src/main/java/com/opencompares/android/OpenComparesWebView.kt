@@ -1,6 +1,7 @@
 package com.opencompares.android
 
 import android.annotation.SuppressLint
+import android.os.Build
 import android.view.MotionEvent
 import android.webkit.GeolocationPermissions
 import android.webkit.WebChromeClient
@@ -8,6 +9,8 @@ import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.CookieManager
+import android.webkit.WebSettings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +48,33 @@ fun OpenComparesWebView(
                 settings.databaseEnabled = true
                 settings.setSupportZoom(true)
                 settings.displayZoomControls = false
+                settings.javaScriptCanOpenWindowsAutomatically = true
+                settings.setSupportMultipleWindows(true)
+                settings.loadsImagesAutomatically = true
+                settings.cacheMode = WebSettings.LOAD_DEFAULT
+                settings.useWideViewPort = true
+                settings.loadWithOverviewMode = true
+                settings.mediaPlaybackRequiresUserGesture = false
+                
+                // Apply initial zoom settings
+                settings.setSupportZoom(true)
+                settings.builtInZoomControls = false
+                settings.displayZoomControls = false
+                
+                // // Apply initial zoom immediately
+                // val initialScale = zoomPercent / 100.0
+                // settings.textZoom = (zoomPercent * 100).toInt()
+
+                // Allow mixed content (some providers load http assets)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    settings.mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                }
+
+                // Ensure cookies are enabled including 3P (identity/session flows)
+                CookieManager.getInstance().setAcceptCookie(true)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                }
 
                 // Capture system UA once
                 if (systemUa.value == null) systemUa.value = settings.userAgentString
@@ -68,6 +98,8 @@ fun OpenComparesWebView(
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         url?.let(onUrlChanged)
+                        
+                        // Apply zoom using CSS zoom
                         val scale = zoomPercent / 100.0
                         evaluateJavascript("document.body.style.zoom = '$scale';", null)
                     }
@@ -91,8 +123,29 @@ fun OpenComparesWebView(
                             callback.invoke(origin, allow, /*remember*/ true)
                         }
                     }
+
+                    // Open target=_blank and popup requests in the same WebView
+                    override fun onCreateWindow(
+                        view: WebView?,
+                        isDialog: Boolean,
+                        isUserGesture: Boolean,
+                        resultMsg: android.os.Message?
+                    ): Boolean {
+
+                        val scale = zoomPercent / 100.0
+                        evaluateJavascript("document.body.style.zoom = '$scale';", null)
+                        // Try to extract URL from the transport and load it here
+                        val transport = resultMsg?.obj as? WebView.WebViewTransport
+                        transport?.webView = view
+                        resultMsg?.sendToTarget()
+                        return true
+                    }
                 }
 
+                // Apply zoom immediately after WebView creation
+                val scale = zoomPercent / 100.0
+                evaluateJavascript("document.body.style.zoom = '$scale';", null)
+                
                 loadUrl(targetUrl)
             }
         },
@@ -113,7 +166,7 @@ fun OpenComparesWebView(
                 wv.loadUrl(targetUrl)
             }
 
-            // Update zoom
+            // Update zoom using CSS zoom
             val scale = zoomPercent / 100.0
             wv.evaluateJavascript("document.body.style.zoom = '$scale';", null)
 

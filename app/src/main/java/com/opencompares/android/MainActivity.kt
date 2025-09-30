@@ -114,10 +114,11 @@ fun MVPCompareScreen() {
         }
     }
 
-    // Per-pane state maps (url, desktop mode, reload token)
+    // Per-pane state maps (url, desktop mode, reload token, zoom)
     val paneUrls = remember { mutableStateMapOf<String, String>() }
     val paneDesktop = remember { mutableStateMapOf<String, Boolean>() }
     val paneReload = remember { mutableStateMapOf<String, Int>() }
+    val paneZoom = remember { mutableStateMapOf<String, Int>() }
 
     // Initialize per-pane URL on first composition
     LaunchedEffect(Unit) {
@@ -125,6 +126,7 @@ fun MVPCompareScreen() {
             paneUrls.putIfAbsent(p.key, p.buildUrl(appliedQuery))
             paneDesktop.putIfAbsent(p.key, false)
             paneReload.putIfAbsent(p.key, 0)
+            paneZoom.putIfAbsent(p.key, p.defaultZoom)
         }
     }
 
@@ -232,11 +234,12 @@ fun MVPCompareScreen() {
                         val currentUrl = paneUrls[provider.key] ?: provider.buildUrl(appliedQuery)
                         val desktopMode = paneDesktop[provider.key] ?: false
                         val reloadToken = paneReload[provider.key] ?: 0
+                        val providerZoom = paneZoom[provider.key] ?: provider.defaultZoom
 
                         var menuOpen by remember { mutableStateOf(false) }
 
                         Card(
-                            modifier = Modifier.fillMaxWidth().height(400.dp),
+                            modifier = Modifier.fillMaxWidth().height(500.dp),
                             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                         ) {
                             Column(Modifier.fillMaxSize()) {
@@ -327,12 +330,12 @@ fun MVPCompareScreen() {
 
                                 // Ultra-compact WebView container
                                 Box(Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp)) {
-                                    OpenComparesWebView(
-                                        provider = provider,
-                                        targetUrl = currentUrl,           // <- explicit URL (search or home)
-                                        zoomPercent = zoom,
-                                        desktopMode = desktopMode,
-                                        reloadToken = reloadToken,
+                                OpenComparesWebView(
+                                    provider = provider,
+                                    targetUrl = currentUrl,           // <- explicit URL (search or home)
+                                    zoomPercent = providerZoom,
+                                    desktopMode = desktopMode,
+                                    reloadToken = reloadToken,
                                         onUrlChanged = { newUrl ->
                                             // Keep the tracked URL in sync with actual navigations
                                             paneUrls[provider.key] = newUrl
@@ -359,6 +362,7 @@ fun MVPCompareScreen() {
                     val currentUrl = paneUrls[provider.key] ?: provider.buildUrl(appliedQuery)
                     val desktopMode = paneDesktop[provider.key] ?: false
                     val reloadToken = paneReload[provider.key] ?: 0
+                    val providerZoom = paneZoom[provider.key] ?: provider.defaultZoom
 
                     var menuOpen by remember { mutableStateOf(false) }
 
@@ -455,7 +459,7 @@ fun MVPCompareScreen() {
                                 OpenComparesWebView(
                                     provider = provider,
                                     targetUrl = currentUrl,
-                                    zoomPercent = zoom,
+                                    zoomPercent = providerZoom,
                                     desktopMode = desktopMode,
                                     reloadToken = reloadToken,
                                     onUrlChanged = { newUrl ->
