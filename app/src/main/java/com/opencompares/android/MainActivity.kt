@@ -11,9 +11,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
@@ -40,6 +42,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
+import androidx.compose.runtime.collectAsState
+import android.location.Geocoder
+import android.os.Build
+import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -129,6 +139,56 @@ fun MVPCompareScreen() {
             pendingGeoResponder?.invoke(false)
             pendingGeoResponder = null
             siteRequestingGeo = null
+        } else {
+            // Start app-level location once permission is granted
+            AppLocation.initialize(context)
+        }
+    }
+
+    // If permission already granted, initialize location provider immediately
+    LaunchedEffect(Unit) {
+        val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (granted) {
+            AppLocation.initialize(context)
+        }
+    }
+
+    val lastLocation = AppLocation.lastLocation.collectAsState(initial = null)
+    var addressText by remember { mutableStateOf<String?>(null) }
+
+    // Reverse geocode when location changes
+    // Capture a non-composable context for use inside effects
+    val appContext = LocalContext.current.applicationContext
+    LaunchedEffect(lastLocation.value) {
+        val loc = lastLocation.value
+        if (loc == null) {
+            addressText = null
+        } else {
+            val geocoder = Geocoder(appContext, Locale.getDefault())
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    // Async callback API
+                    withContext(Dispatchers.Main) {
+                        geocoder.getFromLocation(loc.latitude, loc.longitude, 1) { results ->
+                            val a = results?.firstOrNull()
+                            addressText = if (a != null) {
+                                listOfNotNull(a.subLocality, a.locality, a.adminArea, a.postalCode).joinToString(", ")
+                            } else null
+                        }
+                    }
+                } else {
+                    val results = withContext(Dispatchers.IO) {
+                        @Suppress("DEPRECATION")
+                        geocoder.getFromLocation(loc.latitude, loc.longitude, 1)
+                    }
+                    val a = results?.firstOrNull()
+                    addressText = if (a != null) {
+                        listOfNotNull(a.subLocality, a.locality, a.adminArea, a.postalCode).joinToString(", ")
+                    } else null
+                }
+            } catch (_: Exception) {
+                addressText = null
+            }
         }
     }
 
@@ -396,21 +456,16 @@ fun MVPCompareScreen() {
                                                 )
                                                 // Desktop mode toggle (checkbox)
                                                 DropdownMenuItem(
-                                                    text = {
-                                                        Row(
-                                                            Modifier.fillMaxWidth(),
-                                                            horizontalArrangement = Arrangement.SpaceBetween
-                                                        ) {
-                                                            Text("Desktop mode")
-                                                            Checkbox(
-                                                                checked = desktopMode,
-                                                                onCheckedChange = { checked ->
-                                                                    paneDesktop[provider.key] = checked
-                                                                    // Force reload of the same URL with new UA
-                                                                    paneReload[provider.key] = (paneReload[provider.key] ?: 0) + 1
-                                                                }
-                                                            )
-                                                        }
+                                                    text = { Text("Desktop mode") },
+                                                    trailingIcon = {
+                                                        Checkbox(
+                                                            checked = desktopMode,
+                                                            onCheckedChange = { checked ->
+                                                                paneDesktop[provider.key] = checked
+                                                                // Force reload of the same URL with new UA
+                                                                paneReload[provider.key] = (paneReload[provider.key] ?: 0) + 1
+                                                            }
+                                                        )
                                                     },
                                                     onClick = {
                                                         paneDesktop[provider.key] = !desktopMode
@@ -445,6 +500,52 @@ fun MVPCompareScreen() {
                                         },
                                         modifier = Modifier.fillMaxSize()
                                     )
+                                }
+                            }
+                        }
+                    }
+                    // Footer at end of grid
+                    item(span = { GridItemSpan(maxLineSpan) }) {
+                        val locationText = addressText ?: "Location: unavailable"
+                        Spacer(Modifier.height(4.dp))
+                        Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 2.dp) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "💡 You can Login to each website to get your personalized prices and add to cart directly from the here",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                                Spacer(Modifier.height(4.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = locationText,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Image(
+                                            painter = painterResource(id = R.drawable.ic_logo),
+                                            contentDescription = "App logo",
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            text = "Open Compares",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -524,20 +625,15 @@ fun MVPCompareScreen() {
                                                 }
                                             )
                                             DropdownMenuItem(
-                                                text = {
-                                                    Row(
-                                                        Modifier.fillMaxWidth(),
-                                                        horizontalArrangement = Arrangement.SpaceBetween
-                                                    ) {
-                                                        Text("Desktop mode")
-                                                        Checkbox(
-                                                            checked = desktopMode,
-                                                            onCheckedChange = { checked ->
-                                                                paneDesktop[provider.key] = checked
-                                                                paneReload[provider.key] = (paneReload[provider.key] ?: 0) + 1
-                                                            }
-                                                        )
-                                                    }
+                                                text = { Text("Desktop mode") },
+                                                trailingIcon = {
+                                                    Checkbox(
+                                                        checked = desktopMode,
+                                                        onCheckedChange = { checked ->
+                                                            paneDesktop[provider.key] = checked
+                                                            paneReload[provider.key] = (paneReload[provider.key] ?: 0) + 1
+                                                        }
+                                                    )
                                                 },
                                                 onClick = {
                                                     paneDesktop[provider.key] = !desktopMode
@@ -569,6 +665,49 @@ fun MVPCompareScreen() {
                                     },
                                     modifier = Modifier.fillMaxSize()
                                 )
+                            }
+                        }
+                    }
+                    // Footer below fullscreen content; make parent scrollable if needed
+                    Spacer(Modifier.height(8.dp))
+                    val locationText = addressText ?: "Location: unavailable"
+                    Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 2.dp) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        ) {
+                            Text(
+                                text = "💡 You can Login to each website to get your personalized prices and add to cart directly from the here",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
+                            Spacer(Modifier.height(4.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = locationText,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Image(
+                                        painter = painterResource(id = R.drawable.ic_logo),
+                                        contentDescription = "App logo",
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        text = "Open Compares",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
                             }
                         }
                     }

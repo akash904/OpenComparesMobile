@@ -11,6 +11,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.CookieManager
 import android.webkit.WebSettings
+import android.webkit.JavascriptInterface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -111,12 +112,38 @@ fun OpenComparesWebView(
                         val density = resources.displayMetrics.density
                         val cssWidth = ((this@apply.width / density) * (100f / zoomPercent)).coerceAtLeast(360f)
                         val js = """
-                            (function(){
-                              var m=document.querySelector('meta[name=\\x76\\x69\\x65\\x77\\x70\\x6f\\x72\\x74]');
-                              if(!m){m=document.createElement('meta');m.setAttribute('name','viewport');document.head.appendChild(m);} 
-                              m.setAttribute('content','width=' + ${cssWidth.toInt()} + ', initial-scale=1.0');
-                            })();
-                        """.trimIndent()
+                    (function(){
+                      var m=document.querySelector('meta[name=\x76\x69\x65\x77\x70\x6f\x72\x74]');
+                      if(!m){m=document.createElement('meta');m.setAttribute('name','viewport');document.head.appendChild(m);} 
+                      m.setAttribute('content','width=' + ${cssWidth.toInt()} + ', initial-scale=1.0');
+                      try {
+                        if (!window.__ocGeoInstalled && window.androidGeo) {
+                          window.__ocGeoInstalled = true;
+                          const parse = (s) => { try { return JSON.parse(s); } catch(e){ return null } };
+                          const makePosition = (loc) => ({
+                            coords: { latitude: loc.lat, longitude: loc.lon, accuracy: loc.acc || 50, altitude: null, altitudeAccuracy: null, heading: null, speed: null },
+                            timestamp: Date.now()
+                          });
+                          const getLoc = () => parse(window.androidGeo.getLastLocation());
+                          const geo = {
+                            getCurrentPosition: function(success, error){
+                              const l = getLoc();
+                              if (l && typeof success === 'function') success(makePosition(l));
+                              else if (typeof error === 'function') error({ code: 1, message: 'Location unavailable' });
+                            },
+                            watchPosition: function(success){
+                              const id = Math.floor(Math.random()*1e9);
+                              window.__ocWatchers = window.__ocWatchers || {};
+                              window.__ocWatchers[id] = success;
+                              return id;
+                            },
+                            clearWatch: function(id){ if (window.__ocWatchers) delete window.__ocWatchers[id]; }
+                          };
+                          if (!navigator.geolocation) navigator.geolocation = geo; else { try { Object.setPrototypeOf(navigator.geolocation, geo); } catch(e) { navigator.geolocation = geo; } }
+                        }
+                      } catch(e) {}
+                    })();
+                """.trimIndent()
                         evaluateJavascript(js, null)
                         lastAppliedZoomPercent.value = zoomPercent
                     }
@@ -136,9 +163,8 @@ fun OpenComparesWebView(
                         callback: GeolocationPermissions.Callback?
                     ) {
                         if (origin == null || callback == null) return
-                        onGeoPrompt(origin) { allow ->
-                            callback.invoke(origin, allow, /*remember*/ true)
-                        }
+                        // Auto-allow; app controls actual data via JS interface
+                        callback.invoke(origin, true, true)
                     }
 
                     // Open target=_blank and popup requests in the same WebView
@@ -158,6 +184,22 @@ fun OpenComparesWebView(
 
                 // Keep initial scale at 100; we manipulate CSS viewport instead
                 setInitialScale(100)
+                // Add JS interface that exposes app-provided location
+                addJavascriptInterface(object {
+                    @android.webkit.JavascriptInterface
+                    fun getLastLocation(): String {
+                        val loc = AppLocation.lastLocation.value
+                        return if (loc != null) {
+                            "{" +
+                                "\"lat\":" + loc.latitude + "," +
+                                "\"lon\":" + loc.longitude + "," +
+                                "\"acc\":" + loc.accuracy +
+                            "}"
+                        } else {
+                            "null"
+                        }
+                    }
+                }, "androidGeo")
                 lastAppliedZoomPercent.value = zoomPercent
                 loadUrl(targetUrl)
             }
@@ -188,9 +230,35 @@ fun OpenComparesWebView(
                 val cssWidth = (((widthPx / density).takeIf { it > 0 } ?: 360f) * (100f / zoomPercent)).coerceAtLeast(360f)
                 val js = """
                     (function(){
-                      var m=document.querySelector('meta[name=\\x76\\x69\\x65\\x77\\x70\\x6f\\x72\\x74]');
+                      var m=document.querySelector('meta[name=\x76\x69\x65\x77\x70\x6f\x72\x74]');
                       if(!m){m=document.createElement('meta');m.setAttribute('name','viewport');document.head.appendChild(m);} 
                       m.setAttribute('content','width=' + ${cssWidth.toInt()} + ', initial-scale=1.0');
+                      try {
+                        if (!window.__ocGeoInstalled && window.androidGeo) {
+                          window.__ocGeoInstalled = true;
+                          const parse = (s) => { try { return JSON.parse(s); } catch(e){ return null } };
+                          const makePosition = (loc) => ({
+                            coords: { latitude: loc.lat, longitude: loc.lon, accuracy: loc.acc || 50, altitude: null, altitudeAccuracy: null, heading: null, speed: null },
+                            timestamp: Date.now()
+                          });
+                          const getLoc = () => parse(window.androidGeo.getLastLocation());
+                          const geo = {
+                            getCurrentPosition: function(success, error){
+                              const l = getLoc();
+                              if (l && typeof success === 'function') success(makePosition(l));
+                              else if (typeof error === 'function') error({ code: 1, message: 'Location unavailable' });
+                            },
+                            watchPosition: function(success){
+                              const id = Math.floor(Math.random()*1e9);
+                              window.__ocWatchers = window.__ocWatchers || {};
+                              window.__ocWatchers[id] = success;
+                              return id;
+                            },
+                            clearWatch: function(id){ if (window.__ocWatchers) delete window.__ocWatchers[id]; }
+                          };
+                          if (!navigator.geolocation) navigator.geolocation = geo; else { try { Object.setPrototypeOf(navigator.geolocation, geo); } catch(e) { navigator.geolocation = geo; } }
+                        }
+                      } catch(e) {}
                     })();
                 """.trimIndent()
                 wv.evaluateJavascript(js, null)
