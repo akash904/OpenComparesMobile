@@ -23,6 +23,14 @@ data class Provider(
 
 val MVP_PROVIDERS = listOf(
     Provider(
+        key = "instamart",
+        displayName = "Instamart",
+        urlTemplate = "https://www.swiggy.com/instamart/search?custom_back=true&query={QUERY}",
+        homeUrl = "https://www.swiggy.com/instamart",
+        overrideUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+        defaultZoom = 100
+    ),
+    Provider(
         key = "blinkit",
         displayName = "Blinkit",
         urlTemplate = "https://blinkit.com/s/?q={QUERY}",
@@ -36,14 +44,7 @@ val MVP_PROVIDERS = listOf(
         homeUrl = "https://www.zeptonow.com/",
         defaultZoom = 50
     ),
-    Provider(
-        key = "instamart",
-        displayName = "Instamart",
-        urlTemplate = "https://www.swiggy.com/instamart/search?custom_back=true&query={QUERY}",
-        homeUrl = "https://www.swiggy.com/instamart",
-        overrideUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-        defaultZoom = 100
-    ),
+
     // Marketplace additions
     Provider(
         key = "amazon",

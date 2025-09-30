@@ -9,6 +9,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -38,6 +39,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.painterResource
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -149,18 +151,26 @@ fun MVPCompareScreen() {
     Scaffold(
         topBar = { 
             TopAppBar(
-                modifier = Modifier.height(40.dp),
+                modifier = Modifier.height(50.dp),
                 title = {
                     Box(
                         modifier = Modifier.fillMaxHeight(),
                         contentAlignment = Alignment.CenterStart
                     ) {
-                        Text(
-                            "Open Compares",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(
+                                painter = painterResource(id = R.drawable.ic_logo),
+                                contentDescription = "App logo",
+                                modifier = Modifier.size(20.dp)
                             )
-                        )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "Open Compares",
+                                style = MaterialTheme.typography.titleMedium.copy(
+                                    fontWeight = FontWeight.Bold
+                                )
+                            )
+                        }
                     }
                 },
                 actions = {

@@ -69,9 +69,9 @@ fun OpenComparesWebView(
                 settings.builtInZoomControls = false
                 settings.displayZoomControls = false
                 
-                // // Apply initial zoom immediately
-                // val initialScale = zoomPercent / 100.0
-                // settings.textZoom = (zoomPercent * 100).toInt()
+//                 // Apply initial zoom immediately
+//                 val initialScale = 2 / 100.0
+//                 settings.textZoom = zoomPercent
 
                 // Allow mixed content (some providers load http assets)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
