@@ -527,12 +527,27 @@ fun MVPCompareScreen() {
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text(
-                                        text = locationText,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.weight(1f)
-                                    )
+                                    if (addressText == null) {
+                                        Box(modifier = Modifier.weight(1f)) {
+                                            Button(
+                                                onClick = { locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
+                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                                modifier = Modifier.height(24.dp)
+                                            ) {
+                                                Text(
+                                                    "Get Location Access",
+                                                    style = MaterialTheme.typography.labelSmall
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        Text(
+                                            text = locationText,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Image(
                                             painter = painterResource(id = R.drawable.ic_logo),
@@ -689,12 +704,27 @@ fun MVPCompareScreen() {
                                 modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = locationText,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.weight(1f)
-                                )
+                                if (addressText == null) {
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        Button(
+                                            onClick = { locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION) },
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                            modifier = Modifier.height(24.dp)
+                                        ) {
+                                            Text(
+                                                "Get Location Access",
+                                                style = MaterialTheme.typography.labelSmall
+                                            )
+                                        }
+                                    }
+                                } else {
+                                    Text(
+                                        text = locationText,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Image(
                                         painter = painterResource(id = R.drawable.ic_logo),
