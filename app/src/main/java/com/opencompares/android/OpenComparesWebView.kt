@@ -52,6 +52,7 @@ fun OpenComparesWebView(
                 settings.domStorageEnabled = true
                 settings.databaseEnabled = true
                 settings.setSupportZoom(true)
+                settings.builtInZoomControls = false
                 settings.displayZoomControls = false
                 settings.javaScriptCanOpenWindowsAutomatically = true
                 settings.setSupportMultipleWindows(true)
@@ -106,10 +107,17 @@ fun OpenComparesWebView(
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
                         url?.let(onUrlChanged)
-                        
-                        // Apply zoom using CSS zoom (record last applied)
-                        val scale = zoomPercent / 100.0
-                        evaluateJavascript("document.body.style.zoom = '$scale';", null)
+                        // Emulate desktop by widening CSS viewport based on desired zoom
+                        val density = resources.displayMetrics.density
+                        val cssWidth = ((this@apply.width / density) * (100f / zoomPercent)).coerceAtLeast(360f)
+                        val js = """
+                            (function(){
+                              var m=document.querySelector('meta[name=\\x76\\x69\\x65\\x77\\x70\\x6f\\x72\\x74]');
+                              if(!m){m=document.createElement('meta');m.setAttribute('name','viewport');document.head.appendChild(m);} 
+                              m.setAttribute('content','width=' + ${cssWidth.toInt()} + ', initial-scale=1.0');
+                            })();
+                        """.trimIndent()
+                        evaluateJavascript(js, null)
                         lastAppliedZoomPercent.value = zoomPercent
                     }
 
@@ -148,7 +156,9 @@ fun OpenComparesWebView(
                     }
                 }
 
-                // Initial zoom will be applied after first page load
+                // Keep initial scale at 100; we manipulate CSS viewport instead
+                setInitialScale(100)
+                lastAppliedZoomPercent.value = zoomPercent
                 loadUrl(targetUrl)
             }
         },
@@ -166,13 +176,24 @@ fun OpenComparesWebView(
 
             // Navigate if targetUrl changed
             if (wv.url != targetUrl) {
+                wv.setInitialScale(100)
+                lastAppliedZoomPercent.value = zoomPercent
                 wv.loadUrl(targetUrl)
             }
 
-            // Update zoom only when it changes
+            // Update viewport when zoom changes to force denser responsive layouts
             if (lastAppliedZoomPercent.value != zoomPercent) {
-                val scale = zoomPercent / 100.0
-                wv.evaluateJavascript("document.body.style.zoom = '$scale';", null)
+                val density = wv.resources.displayMetrics.density
+                val widthPx = if (wv.width > 0) wv.width else wv.measuredWidth
+                val cssWidth = (((widthPx / density).takeIf { it > 0 } ?: 360f) * (100f / zoomPercent)).coerceAtLeast(360f)
+                val js = """
+                    (function(){
+                      var m=document.querySelector('meta[name=\\x76\\x69\\x65\\x77\\x70\\x6f\\x72\\x74]');
+                      if(!m){m=document.createElement('meta');m.setAttribute('name','viewport');document.head.appendChild(m);} 
+                      m.setAttribute('content','width=' + ${cssWidth.toInt()} + ', initial-scale=1.0');
+                    })();
+                """.trimIndent()
+                wv.evaluateJavascript(js, null)
                 lastAppliedZoomPercent.value = zoomPercent
             }
 
