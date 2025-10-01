@@ -109,9 +109,9 @@ fun MVPCompareScreen() {
     val context = LocalContext.current
 
     // 1) What the user is typing
-    var queryField by remember { mutableStateOf(TextFieldValue("tea")) }
+    var queryField by remember { mutableStateOf(TextFieldValue("")) }
     // 2) We apply this query to all panes only when Search is clicked
-    var appliedQuery by remember { mutableStateOf("tea") }
+    var appliedQuery by remember { mutableStateOf("") }
 
     // Zoom 5–100%, default 50%
     var zoom by remember { mutableStateOf(50) }
@@ -201,7 +201,7 @@ fun MVPCompareScreen() {
     // Initialize per-pane URL on first composition
     LaunchedEffect(Unit) {
         providers.forEach { p ->
-            paneUrls.putIfAbsent(p.key, p.buildUrl(appliedQuery))
+            paneUrls.putIfAbsent(p.key, p.home())
             paneDesktop.putIfAbsent(p.key, false)
             paneReload.putIfAbsent(p.key, 0)
             paneZoom.putIfAbsent(p.key, p.defaultZoom)
@@ -386,7 +386,7 @@ fun MVPCompareScreen() {
                     modifier = Modifier.fillMaxSize()
                 ) {
                     items(visibleProviders, key = { it.key }) { provider ->
-                        val currentUrl = paneUrls[provider.key] ?: provider.buildUrl(appliedQuery)
+                        val currentUrl = paneUrls[provider.key] ?: provider.home()
                         val desktopMode = paneDesktop[provider.key] ?: false
                         val reloadToken = paneReload[provider.key] ?: 0
                         val providerZoom = paneZoom[provider.key] ?: provider.defaultZoom
@@ -571,7 +571,7 @@ fun MVPCompareScreen() {
                 // Fullscreen single pane view
                 val provider = providers.firstOrNull { it.key == fullScreenPane && selectedProviders.contains(it.key) }
                 if (provider != null) {
-                    val currentUrl = paneUrls[provider.key] ?: provider.buildUrl(appliedQuery)
+                    val currentUrl = paneUrls[provider.key] ?: provider.home()
                     val desktopMode = paneDesktop[provider.key] ?: false
                     val reloadToken = paneReload[provider.key] ?: 0
                     val providerZoom = paneZoom[provider.key] ?: provider.defaultZoom
