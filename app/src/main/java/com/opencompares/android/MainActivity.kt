@@ -2,6 +2,7 @@ package com.opencompares.android
 
 import android.Manifest
 import android.content.Intent
+import android.content.Context
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -224,6 +225,8 @@ fun MVPCompareScreen() {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    // Preferences for persisting selection across sessions
+    val prefs = remember { context.getSharedPreferences("oc_prefs", Context.MODE_PRIVATE) }
 
     // 1) What the user is typing
     var queryField by remember { mutableStateOf(TextFieldValue("")) }
@@ -238,7 +241,10 @@ fun MVPCompareScreen() {
 
     // Marketplaces selection dialog and state
     var showMarketplaceDialog by remember { mutableStateOf(false) }
-    var selectedProviders by remember { mutableStateOf(mutableSetOf("blinkit", "zepto", "instamart")) }
+    var selectedProviders by remember {
+        val saved = prefs.getStringSet("selectedProviders", null)
+        mutableStateOf(saved?.toMutableSet() ?: mutableSetOf("blinkit", "zepto", "instamart"))
+    }
     var tempMarketplaceSelection by remember { mutableStateOf(mutableSetOf<String>()) }
     LaunchedEffect(showMarketplaceDialog) {
         if (showMarketplaceDialog) {
@@ -918,6 +924,8 @@ fun MVPCompareScreen() {
                             if (fullScreenPane != null && !selectedProviders.contains(fullScreenPane!!)) {
                                 fullScreenPane = null
                             }
+                            // Persist selection
+                            prefs.edit().putStringSet("selectedProviders", selectedProviders).apply()
                             showMarketplaceDialog = false
                         }) { Text("Save") }
                     },

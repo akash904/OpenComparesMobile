@@ -44,6 +44,8 @@ fun OpenComparesWebView(
     // Track last applied values to avoid redundant work in updates
     val lastAppliedZoomPercent = remember { mutableStateOf<Int?>(null) }
     val lastAppliedReloadToken = remember { mutableStateOf<Int?>(null) }
+    // Track the last URL we explicitly loaded to avoid redundant reloads during recompositions
+    val lastLoadedUrl = remember { mutableStateOf<String?>(null) }
 
     AndroidView(
         modifier = modifier,
@@ -107,7 +109,11 @@ fun OpenComparesWebView(
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView?, url: String?) {
                         super.onPageFinished(view, url)
-                        url?.let(onUrlChanged)
+                        if (url != null) {
+                            // Update tracked URL and notify parent only when we actually finished a page
+                            lastLoadedUrl.value = url
+                            onUrlChanged(url)
+                        }
                         // Emulate desktop by widening CSS viewport based on desired zoom
                         val density = resources.displayMetrics.density
                         val cssWidth = ((this@apply.width / density) * (100f / zoomPercent)).coerceAtLeast(360f)
@@ -202,6 +208,7 @@ fun OpenComparesWebView(
                 }, "androidGeo")
                 lastAppliedZoomPercent.value = zoomPercent
                 loadUrl(targetUrl)
+                lastLoadedUrl.value = targetUrl
             }
         },
         update = { wv ->
@@ -216,11 +223,12 @@ fun OpenComparesWebView(
                 wv.settings.userAgentString = desiredUa
             }
 
-            // Navigate if targetUrl changed
-            if (wv.url != targetUrl) {
+            // Navigate only if the intended target differs from what we last loaded
+            if (lastLoadedUrl.value != targetUrl) {
                 wv.setInitialScale(100)
                 lastAppliedZoomPercent.value = zoomPercent
                 wv.loadUrl(targetUrl)
+                lastLoadedUrl.value = targetUrl
             }
 
             // Update viewport when zoom changes to force denser responsive layouts
