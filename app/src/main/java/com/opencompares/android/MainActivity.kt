@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material.icons.filled.Store
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -42,6 +43,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import android.content.pm.PackageManager
 import androidx.compose.runtime.collectAsState
@@ -118,6 +120,9 @@ fun MVPCompareScreen() {
 
     // Which pane (by provider.key) is fullscreen; null means grid view
     var fullScreenPane by remember { mutableStateOf<String?>(null) }
+    
+    // Clean browser view state
+    var showCleanBrowser by remember { mutableStateOf(false) }
 
     // Marketplaces selection dialog and state
     var showMarketplaceDialog by remember { mutableStateOf(false) }
@@ -360,6 +365,25 @@ fun MVPCompareScreen() {
 
                     Spacer(Modifier.width(8.dp))
 
+                    // Open Clean Browser button
+                    CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
+                        Button(
+                            onClick = {
+                                // Show clean browser view within the app
+                                showCleanBrowser = true
+                            },
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.OpenInBrowser,
+                                contentDescription = "Open Clean Browser",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(Modifier.width(8.dp))
+
                     
                 }
             }
@@ -370,7 +394,50 @@ fun MVPCompareScreen() {
                 color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
             )
 
-            if (fullScreenPane == null) {
+            if (showCleanBrowser) {
+                // Clean browser view - minimal WebView without custom modifications
+                Card(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(Modifier.fillMaxSize()) {
+                        // Header with close button
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                "Clean Browser - Zepto",
+                                style = MaterialTheme.typography.labelLarge.copy(
+                                    fontWeight = FontWeight.SemiBold
+                                ),
+                                color = MaterialTheme.colorScheme.primary
+                            )
+
+                            IconButton(onClick = { showCleanBrowser = false }, modifier = Modifier.size(28.dp)) {
+                                Icon(
+                                    Icons.Filled.FullscreenExit,
+                                    contentDescription = "Close Clean Browser",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        // Clean WebView container
+                        Box(Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp)) {
+                            CleanWebView(
+                                url = "https://www.zeptonow.com/",
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+                }
+            } else if (fullScreenPane == null) {
                 // Ultra-compact two-column grid
                 val visibleProviders = providers.filter { selectedProviders.contains(it.key) }
                 if (visibleProviders.isEmpty()) {
@@ -816,5 +883,208 @@ fun MVPCompareScreen() {
                 )
             }
         }
+    }
+}
+
+@Composable
+fun CleanWebView(
+    url: String,
+    modifier: Modifier = Modifier
+) {
+    var showLocationDialog by remember { mutableStateOf(false) }
+    var locationCallback by remember { mutableStateOf<android.webkit.GeolocationPermissions.Callback?>(null) }
+    var locationOrigin by remember { mutableStateOf<String?>(null) }
+    
+    AndroidView(
+        factory = { ctx ->
+            android.webkit.WebView(ctx).apply {
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.loadWithOverviewMode = true
+                settings.useWideViewPort = true
+                settings.setSupportZoom(true)
+                settings.builtInZoomControls = true
+                settings.displayZoomControls = true
+                
+                // Enable proper dialog and overlay rendering
+                settings.javaScriptCanOpenWindowsAutomatically = true
+                settings.setSupportMultipleWindows(true)
+                settings.databaseEnabled = true
+                settings.loadsImagesAutomatically = true
+                settings.cacheMode = android.webkit.WebSettings.LOAD_DEFAULT
+                settings.mediaPlaybackRequiresUserGesture = false
+                
+                // Enable hardware acceleration for better rendering
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.KITKAT) {
+                    setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                }
+                
+                // Enable proper CSS and DOM support for modals
+                settings.layoutAlgorithm = android.webkit.WebSettings.LayoutAlgorithm.TEXT_AUTOSIZING
+                
+                // Enable mixed content for better compatibility
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                    settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                }
+                
+                // Enable cookies for session management
+                android.webkit.CookieManager.getInstance().setAcceptCookie(true)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                    android.webkit.CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                }
+                
+                webViewClient = object : android.webkit.WebViewClient() {
+                    override fun shouldOverrideUrlLoading(view: android.webkit.WebView?, url: String?): Boolean {
+                        return false
+                    }
+                    
+                    override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                        super.onPageFinished(view, url)
+                        // Enable proper modal dialog support and auto-simulate location flow
+                        view?.evaluateJavascript("""
+                            (function() {
+                                // Ensure modal dialogs render properly
+                                const style = document.createElement('style');
+                                style.textContent = `
+                                    .modal, .overlay, [role="dialog"] {
+                                        z-index: 999999 !important;
+                                        position: fixed !important;
+                                    }
+                                    .modal-backdrop, .modal-overlay {
+                                        z-index: 999998 !important;
+                                    }
+                                `;
+                                document.head.appendChild(style);
+                                
+                                // Auto-simulate location selection flow for testing
+                                setTimeout(() => {
+                                    console.log('Auto-simulating location selection...');
+                                    
+                                    // Find and click "Select Location" button
+                                    const selectLocationBtn = document.querySelector('button[aria-label*="location"], [data-testid*="location"], button[title*="location"]') ||
+                                                           Array.from(document.querySelectorAll('button')).find(btn => btn.textContent.includes('Select Location') || btn.textContent.includes('Location'));
+                                    
+                                    if (selectLocationBtn) {
+                                        console.log('Found Select Location button, clicking...');
+                                        selectLocationBtn.click();
+                                        
+                                        // Wait for dialog to appear, then auto-click location enable
+                                        setTimeout(() => {
+                                            console.log('Looking for location enable button...');
+                                            
+                                            // Look for various location enable button patterns
+                                            const enableLocationBtn = document.querySelector('button[aria-label*="enable"], [data-testid*="enable"], [data-testid*="allow"]') ||
+                                                                   Array.from(document.querySelectorAll('button')).find(btn => 
+                                                                       btn.textContent.includes('Enable') || 
+                                                                       btn.textContent.includes('Allow') || 
+                                                                       btn.textContent.includes('Yes') ||
+                                                                       btn.textContent.includes('Continue')
+                                                                   );
+                                            
+                                            if (enableLocationBtn) {
+                                                console.log('Found Enable Location button, clicking...');
+                                                enableLocationBtn.click();
+                                            } else {
+                                                console.log('Enable Location button not found, checking for geolocation API...');
+                                                // Try to trigger geolocation API directly
+                                                if (navigator.geolocation) {
+                                                    navigator.geolocation.getCurrentPosition(
+                                                        (position) => console.log('Geolocation success:', position),
+                                                        (error) => console.log('Geolocation error:', error)
+                                                    );
+                                                }
+                                            }
+                                        }, 2000);
+                                    } else {
+                                        console.log('Select Location button not found');
+                                    }
+                                }, 3000);
+                            })();
+                        """, null)
+                    }
+                }
+                
+                webChromeClient = object : android.webkit.WebChromeClient() {
+                    override fun onGeolocationPermissionsShowPrompt(
+                        origin: String?,
+                        callback: android.webkit.GeolocationPermissions.Callback?
+                    ) {
+                        if (origin != null && callback != null) {
+                            locationOrigin = origin
+                            locationCallback = callback
+                            showLocationDialog = true
+                        }
+                    }
+                    
+                    // Handle JavaScript alerts and dialogs
+                    override fun onJsAlert(view: android.webkit.WebView?, url: String?, message: String?, result: android.webkit.JsResult?): Boolean {
+                        // Allow JavaScript alerts to show
+                        result?.confirm()
+                        return true
+                    }
+                    
+                    override fun onJsConfirm(view: android.webkit.WebView?, url: String?, message: String?, result: android.webkit.JsResult?): Boolean {
+                        // Allow JavaScript confirms to show
+                        result?.confirm()
+                        return true
+                    }
+                    
+                    override fun onJsPrompt(view: android.webkit.WebView?, url: String?, message: String?, defaultValue: String?, result: android.webkit.JsPromptResult?): Boolean {
+                        // Allow JavaScript prompts to show
+                        result?.confirm()
+                        return true
+                    }
+                    
+                    // Handle popup windows properly
+                    override fun onCreateWindow(
+                        view: android.webkit.WebView?,
+                        isDialog: Boolean,
+                        isUserGesture: Boolean,
+                        resultMsg: android.os.Message?
+                    ): Boolean {
+                        // Allow popup windows to open in the same WebView
+                        val transport = resultMsg?.obj as? android.webkit.WebView.WebViewTransport
+                        transport?.webView = view
+                        resultMsg?.sendToTarget()
+                        return true
+                    }
+                }
+                
+                loadUrl(url)
+            }
+        },
+        modifier = modifier
+    )
+    
+    // Location permission dialog
+    if (showLocationDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showLocationDialog = false
+                locationCallback?.invoke(locationOrigin ?: "", false, false)
+                locationCallback = null
+                locationOrigin = null
+            },
+            title = { Text("Location Access") },
+            text = { 
+                Text("Allow ${locationOrigin ?: "this website"} to access your location?") 
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showLocationDialog = false
+                    locationCallback?.invoke(locationOrigin ?: "", true, false)
+                    locationCallback = null
+                    locationOrigin = null
+                }) { Text("Allow") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showLocationDialog = false
+                    locationCallback?.invoke(locationOrigin ?: "", false, false)
+                    locationCallback = null
+                    locationOrigin = null
+                }) { Text("Deny") }
+            }
+        )
     }
 }

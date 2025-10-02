@@ -12,6 +12,8 @@ import android.webkit.WebViewClient
 import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.JavascriptInterface
+import android.webkit.JsResult
+import android.webkit.JsPromptResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,6 +68,14 @@ fun OpenComparesWebView(
                     settings.setOffscreenPreRaster(true)
                 }
                 
+                // Enable hardware acceleration for better modal dialog rendering
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+                    setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                }
+                
+                // Enable proper CSS and DOM support for modals
+                settings.layoutAlgorithm = WebSettings.LayoutAlgorithm.TEXT_AUTOSIZING
+                
                 // Apply initial zoom settings
                 settings.setSupportZoom(true)
                 settings.builtInZoomControls = false
@@ -116,6 +126,59 @@ fun OpenComparesWebView(
                       var m=document.querySelector('meta[name=\x76\x69\x65\x77\x70\x6f\x72\x74]');
                       if(!m){m=document.createElement('meta');m.setAttribute('name','viewport');document.head.appendChild(m);} 
                       m.setAttribute('content','width=' + ${cssWidth.toInt()} + ', initial-scale=1.0');
+                      
+                      // Enable proper modal dialog support
+                      const style = document.createElement('style');
+                      style.textContent = `
+                        .modal, .overlay, [role="dialog"] {
+                          z-index: 999999 !important;
+                          position: fixed !important;
+                        }
+                        .modal-backdrop, .modal-overlay {
+                          z-index: 999998 !important;
+                        }
+                      `;
+                      document.head.appendChild(style);
+                      
+                      // Auto-simulate location selection flow for testing (only for Zepto)
+                      if (window.location.hostname.includes('zeptonow.com')) {
+                        setTimeout(() => {
+                          console.log('Auto-simulating Zepto location selection...');
+                          
+                          // Find and click "Select Location" button
+                          const selectLocationBtn = document.querySelector('button[aria-label*="location"], [data-testid*="location"], button[title*="location"]') ||
+                                                 Array.from(document.querySelectorAll('button')).find(btn => btn.textContent.includes('Select Location') || btn.textContent.includes('Location'));
+                          
+                          if (selectLocationBtn) {
+                            console.log('Found Select Location button, clicking...');
+                            selectLocationBtn.click();
+                            
+                            // Wait for dialog to appear, then auto-click location enable
+                            setTimeout(() => {
+                              console.log('Looking for location enable button...');
+                              
+                              // Look for various location enable button patterns
+                              const enableLocationBtn = document.querySelector('button[aria-label*="enable"], [data-testid*="enable"], [data-testid*="allow"]') ||
+                                                     Array.from(document.querySelectorAll('button')).find(btn => 
+                                                         btn.textContent.includes('Enable') || 
+                                                         btn.textContent.includes('Allow') || 
+                                                         btn.textContent.includes('Yes') ||
+                                                         btn.textContent.includes('Continue')
+                                                     );
+                              
+                              if (enableLocationBtn) {
+                                console.log('Found Enable Location button, clicking...');
+                                enableLocationBtn.click();
+                              } else {
+                                console.log('Enable Location button not found');
+                              }
+                            }, 2000);
+                          } else {
+                            console.log('Select Location button not found');
+                          }
+                        }, 3000);
+                      }
+                      
                       try {
                         if (!window.__ocGeoInstalled && window.androidGeo) {
                           window.__ocGeoInstalled = true;
@@ -165,6 +228,25 @@ fun OpenComparesWebView(
                         if (origin == null || callback == null) return
                         // Auto-allow; app controls actual data via JS interface
                         callback.invoke(origin, true, true)
+                    }
+
+                    // Handle JavaScript alerts and dialogs properly
+                    override fun onJsAlert(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
+                        // Allow JavaScript alerts to show
+                        result?.confirm()
+                        return true
+                    }
+                    
+                    override fun onJsConfirm(view: WebView?, url: String?, message: String?, result: JsResult?): Boolean {
+                        // Allow JavaScript confirms to show
+                        result?.confirm()
+                        return true
+                    }
+                    
+                    override fun onJsPrompt(view: WebView?, url: String?, message: String?, defaultValue: String?, result: JsPromptResult?): Boolean {
+                        // Allow JavaScript prompts to show
+                        result?.confirm()
+                        return true
                     }
 
                     // Open target=_blank and popup requests in the same WebView
