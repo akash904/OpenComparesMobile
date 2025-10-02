@@ -32,12 +32,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -169,16 +174,27 @@ private fun CompactSearchField(
     value: TextFieldValue,
     onValueChange: (TextFieldValue) -> Unit,
     placeholder: String,
+    onSearch: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val shape = RoundedCornerShape(8.dp)
     val borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
     val containerColor = MaterialTheme.colorScheme.surface
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
         singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(
+            onSearch = {
+                onSearch()
+                focusManager.clearFocus()
+                keyboardController?.hide()
+            }
+        ),
         textStyle = MaterialTheme.typography.bodySmall.copy(color = MaterialTheme.colorScheme.onSurface),
         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
         modifier = modifier
@@ -206,6 +222,8 @@ private fun CompactSearchField(
 fun MVPCompareScreen() {
     val providers = remember { MVP_PROVIDERS } // Blinkit, Zepto, Instamart
     val context = LocalContext.current
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     // 1) What the user is typing
     var queryField by remember { mutableStateOf(TextFieldValue("")) }
@@ -424,6 +442,15 @@ fun MVPCompareScreen() {
                         value = queryField,
                         onValueChange = { queryField = it },
                         placeholder = "Search...",
+                        onSearch = {
+                            // Execute search when keyboard Search/Enter pressed
+                            appliedQuery = queryField.text
+                            providers.forEach { p ->
+                                if (selectedProviders.contains(p.key)) {
+                                    paneUrls[p.key] = p.buildUrl(appliedQuery)
+                                }
+                            }
+                        },
                         modifier = Modifier.weight(1f)
                     )
                     
@@ -438,6 +465,8 @@ fun MVPCompareScreen() {
                                     paneUrls[p.key] = p.buildUrl(appliedQuery)
                                 }
                             }
+                            focusManager.clearFocus()
+                            keyboardController?.hide()
                         },
                         modifier = Modifier.height(32.dp)
                     ) { 

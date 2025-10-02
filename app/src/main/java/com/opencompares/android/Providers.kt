@@ -51,13 +51,20 @@ val MVP_PROVIDERS = listOf(
         displayName = "Amazon.in",
         urlTemplate = "https://www.amazon.in/s?k={QUERY}",
         homeUrl = "https://www.amazon.in/",
-        defaultZoom = 60
+        defaultZoom = 50
     ),
     Provider(
         key = "flipkart",
         displayName = "Flipkart",
         urlTemplate = "https://www.flipkart.com/search?q={QUERY}",
         homeUrl = "https://www.flipkart.com/",
+        defaultZoom = 50
+    ),
+    Provider(
+        key = "meesho",
+        displayName = "Meesho",
+        urlTemplate = "https://www.meesho.com/search?q={QUERY}",
+        homeUrl = "https://www.meesho.com/",
         defaultZoom = 50
     ),
     Provider(
