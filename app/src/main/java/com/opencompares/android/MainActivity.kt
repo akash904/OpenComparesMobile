@@ -244,6 +244,16 @@ fun MVPCompareScreen() {
         }
     }
 
+	// Prompt for location permission on app start if not granted yet (once per session)
+	var requestedPermissionOnStart by remember { mutableStateOf(false) }
+	LaunchedEffect(Unit) {
+		val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+		if (!granted && !requestedPermissionOnStart) {
+			requestedPermissionOnStart = true
+			locationPermission.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+		}
+	}
+
     // If permission already granted, initialize location provider immediately
     LaunchedEffect(Unit) {
         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
