@@ -122,6 +122,46 @@ fun OpenComparesWebView(
                       var m=document.querySelector('meta[name=\x76\x69\x65\x77\x70\x6f\x72\x74]');
                       if(!m){m=document.createElement('meta');m.setAttribute('name','viewport');document.head.appendChild(m);} 
                       m.setAttribute('content','width=' + ${cssWidth.toInt()} + ', initial-scale=1.0');
+                      
+                      // Auto-simulate location selection flow for testing (only for Zepto)
+      if (window.location.hostname.includes('zeptonow.com')) {
+        setTimeout(() => {
+          console.log('Auto-simulating Zepto location selection...');
+          
+          // Find and click "Select Location" button
+          const selectLocationBtn = document.querySelector('button[aria-label*="location"], [data-testid*="location"], button[title*="location"]') ||
+                                 Array.from(document.querySelectorAll('button')).find(btn => btn.textContent.includes('Select Location') || btn.textContent.includes('Location'));
+          
+          if (selectLocationBtn) {
+            console.log('Found Select Location button, clicking...');
+            selectLocationBtn.click();
+            
+            // Wait for dialog to appear, then auto-click location enable
+            setTimeout(() => {
+              console.log('Looking for location enable button...');
+              
+              // Look for various location enable button patterns
+              const enableLocationBtn = document.querySelector('button[aria-label*="enable"], [data-testid*="enable"], [data-testid*="allow"]') ||
+                                     Array.from(document.querySelectorAll('button')).find(btn => 
+                                         btn.textContent.includes('Enable') || 
+                                         btn.textContent.includes('Allow') || 
+                                         btn.textContent.includes('Yes') ||
+                                         btn.textContent.includes('Continue')
+                                     );
+              
+              if (enableLocationBtn) {
+                console.log('Found Enable Location button, clicking...');
+                enableLocationBtn.click();
+              } else {
+                console.log('Enable Location button not found');
+              }
+            }, 2000);
+          } else {
+            console.log('Select Location button not found');
+          }
+        }, 3000);
+      }
+                      
                       try {
                         if (!window.__ocGeoInstalled && window.androidGeo) {
                           window.__ocGeoInstalled = true;
@@ -153,6 +193,9 @@ fun OpenComparesWebView(
                         evaluateJavascript(js, null)
                         lastAppliedZoomPercent.value = zoomPercent
                     }
+
+
+
 
                     override fun onReceivedError(
                         view: WebView?,
