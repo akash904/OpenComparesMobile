@@ -46,6 +46,8 @@ fun OpenComparesWebView(
     val lastAppliedReloadToken = remember { mutableStateOf<Int?>(null) }
     // Track the last URL we explicitly loaded to avoid redundant reloads during recompositions
     val lastLoadedUrl = remember { mutableStateOf<String?>(null) }
+    // Track the last target URL to prevent unnecessary reloads when switching views
+    val lastTargetUrl = remember { mutableStateOf<String?>(null) }
 
     AndroidView(
         modifier = modifier,
@@ -252,6 +254,7 @@ fun OpenComparesWebView(
                 lastAppliedZoomPercent.value = zoomPercent
                 loadUrl(targetUrl)
                 lastLoadedUrl.value = targetUrl
+                lastTargetUrl.value = targetUrl
             }
         },
         update = { wv ->
@@ -267,11 +270,13 @@ fun OpenComparesWebView(
             }
 
             // Navigate only if the intended target differs from what we last loaded
-            if (lastLoadedUrl.value != targetUrl) {
+            // AND the target URL has actually changed (not just a view mode switch)
+            if (lastLoadedUrl.value != targetUrl && lastTargetUrl.value != targetUrl) {
                 wv.setInitialScale(100)
                 lastAppliedZoomPercent.value = zoomPercent
                 wv.loadUrl(targetUrl)
                 lastLoadedUrl.value = targetUrl
+                lastTargetUrl.value = targetUrl
             }
 
             // Update viewport when zoom changes to force denser responsive layouts
