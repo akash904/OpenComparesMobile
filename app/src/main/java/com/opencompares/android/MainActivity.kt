@@ -246,9 +246,25 @@ fun MVPCompareScreen() {
         mutableStateOf(saved?.toMutableSet() ?: mutableSetOf("blinkit", "zepto", "instamart"))
     }
     var tempMarketplaceSelection by remember { mutableStateOf(mutableSetOf<String>()) }
+    
+    // Grid size state (1 or 2 columns)
+    var gridColumns by remember {
+        val saved = prefs.getInt("gridColumns", 2)
+        mutableStateOf(saved)
+    }
+    var tempGridColumns by remember { mutableStateOf(2) }
+    
+    // Grid height state (in dp)
+    var gridHeight by remember {
+        val saved = prefs.getInt("gridHeight", 500)
+        mutableStateOf(saved)
+    }
+    var tempGridHeight by remember { mutableStateOf(500) }
     LaunchedEffect(showMarketplaceDialog) {
         if (showMarketplaceDialog) {
             tempMarketplaceSelection = selectedProviders.toMutableSet()
+            tempGridColumns = gridColumns
+            tempGridHeight = gridHeight
         }
     }
 
@@ -523,7 +539,7 @@ fun MVPCompareScreen() {
                     }
                 } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Fixed(2),
+                    columns = GridCells.Fixed(gridColumns),
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -538,7 +554,7 @@ fun MVPCompareScreen() {
                         var menuOpen by remember { mutableStateOf(false) }
 
                         Card(
-                            modifier = Modifier.fillMaxWidth().height(500.dp),
+                            modifier = Modifier.fillMaxWidth().height(gridHeight.dp),
                             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                         ) {
                             Column(Modifier.fillMaxSize()) {
@@ -624,6 +640,7 @@ fun MVPCompareScreen() {
 
                                 // Ultra-compact WebView container
                                 Box(Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp)) {
+                                key(provider.key) {
                                 OpenComparesWebView(
                                     provider = provider,
                                     targetUrl = currentUrl,           // <- explicit URL (search or home)
@@ -644,6 +661,7 @@ fun MVPCompareScreen() {
                                         },
                                         modifier = Modifier.fillMaxSize()
                                     )
+                                }
                                 }
                             }
                         }
@@ -807,6 +825,7 @@ fun MVPCompareScreen() {
 
                             // Fullscreen WebView fills all
                             Box(Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp)) {
+                                key(provider.key) {
                                 OpenComparesWebView(
                                     provider = provider,
                                     targetUrl = currentUrl,
@@ -824,6 +843,7 @@ fun MVPCompareScreen() {
                                     },
                                     modifier = Modifier.fillMaxSize()
                                 )
+                                }
                             }
                         }
                     }
@@ -899,6 +919,41 @@ fun MVPCompareScreen() {
                                 .heightIn(max = 360.dp)
                                 .verticalScroll(rememberScrollState())
                         ) {
+                            // Grid size selector
+                            Text(
+                                text = "Grid Layout",
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Columns")
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("1")
+                                    RadioButton(
+                                        selected = tempGridColumns == 1,
+                                        onClick = { tempGridColumns = 1 }
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("2")
+                                    RadioButton(
+                                        selected = tempGridColumns == 2,
+                                        onClick = { tempGridColumns = 2 }
+                                    )
+                                }
+                            }
+                            
+                            Spacer(Modifier.height(16.dp))
+                            
+                            // Marketplace selection
+                            Text(
+                                text = "Marketplaces",
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
                             providers.forEach { p ->
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
@@ -916,16 +971,55 @@ fun MVPCompareScreen() {
                                     )
                                 }
                             }
+                            
+                            Spacer(Modifier.height(16.dp))
+                            
+                            // Grid height controls
+                            Text(
+                                text = "Grid Height",
+                                style = MaterialTheme.typography.titleSmall,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Height (dp)")
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(
+                                        onClick = { tempGridHeight = (tempGridHeight - 50).coerceIn(300, 800) }
+                                    ) {
+                                        Text("-")
+                                    }
+                                    Text(
+                                        text = tempGridHeight.toString(),
+                                        modifier = Modifier.padding(horizontal = 8.dp),
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    TextButton(
+                                        onClick = { tempGridHeight = (tempGridHeight + 50).coerceIn(300, 800) }
+                                    ) {
+                                        Text("+")
+                                    }
+                                }
+                            }
                         }
                     },
                     confirmButton = {
                         TextButton(onClick = {
                             selectedProviders = tempMarketplaceSelection.toMutableSet()
+                            gridColumns = tempGridColumns
+                            gridHeight = tempGridHeight
                             if (fullScreenPane != null && !selectedProviders.contains(fullScreenPane!!)) {
                                 fullScreenPane = null
                             }
                             // Persist selection
-                            prefs.edit().putStringSet("selectedProviders", selectedProviders).apply()
+                            prefs.edit()
+                                .putStringSet("selectedProviders", selectedProviders)
+                                .putInt("gridColumns", gridColumns)
+                                .putInt("gridHeight", gridHeight)
+                                .apply()
                             showMarketplaceDialog = false
                         }) { Text("Save") }
                     },
