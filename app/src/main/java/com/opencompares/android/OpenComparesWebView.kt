@@ -36,6 +36,8 @@ fun OpenComparesWebView(
     onUrlChanged: (String) -> Unit,
     onError: (String) -> Unit,
     onGeoPrompt: (origin: String, respond: (allow: Boolean) -> Unit) -> Unit,
+    backRequestToken: Int,             // bump this int to request a back navigation
+    onCanGoBackChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val systemUa = remember { mutableStateOf<String?>(null) }
@@ -48,6 +50,8 @@ fun OpenComparesWebView(
     val lastLoadedUrl = remember { mutableStateOf<String?>(null) }
     // Track the last target URL to prevent unnecessary reloads when switching views
     val lastTargetUrl = remember { mutableStateOf<String?>(null) }
+    // Track last processed back token to avoid duplicate handling
+    val lastBackToken = remember { mutableStateOf<Int?>(null) }
 
     AndroidView(
         modifier = modifier,
@@ -116,6 +120,8 @@ fun OpenComparesWebView(
                             lastLoadedUrl.value = url
                             onUrlChanged(url)
                         }
+                        // Report if we can navigate back
+                        onCanGoBackChanged(view?.canGoBack() == true)
                         // Emulate desktop by widening CSS viewport based on desired zoom
                         val density = resources.displayMetrics.density
                         val cssWidth = ((this@apply.width / density) * (100f / zoomPercent)).coerceAtLeast(360f)
@@ -255,6 +261,8 @@ fun OpenComparesWebView(
                 loadUrl(targetUrl)
                 lastLoadedUrl.value = targetUrl
                 lastTargetUrl.value = targetUrl
+                // Initial canGoBack state on first load
+                onCanGoBackChanged(this.canGoBack())
             }
         },
         update = { wv ->
@@ -327,6 +335,16 @@ fun OpenComparesWebView(
                     wv.reload()
                 }
                 lastAppliedReloadToken.value = reloadToken
+            }
+
+            // Handle back navigation requests
+            if (lastBackToken.value != backRequestToken) {
+                if (wv.canGoBack()) {
+                    wv.goBack()
+                }
+                lastBackToken.value = backRequestToken
+                // Update canGoBack state after attempting to go back
+                onCanGoBackChanged(wv.canGoBack())
             }
         }
     )

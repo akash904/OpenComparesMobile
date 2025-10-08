@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 // removed unused import Search icon
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material.icons.filled.Store
@@ -592,6 +593,9 @@ fun MVPCompareScreen() {
                         ) {
                             Column(Modifier.fillMaxSize()) {
                                 // Ultra-compact header with provider name and menu
+                                // Per-pane back navigation state shared between header and WebView
+                                var backToken by remember(provider.key) { mutableStateOf(0) }
+                                var canGoBack by remember(provider.key) { mutableStateOf(false) }
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -608,6 +612,15 @@ fun MVPCompareScreen() {
                                     )
 
                                     Row(verticalAlignment = Alignment.CenterVertically) {
+                                        CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
+                                            IconButton(onClick = { backToken += 1 }, enabled = canGoBack, modifier = Modifier.size(28.dp)) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.ArrowBack,
+                                                    contentDescription = "Go back",
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
+                                        }
                                         IconButton(onClick = { fullScreenPane = provider.key }, modifier = Modifier.size(28.dp)) {
                                             Icon(
                                                 Icons.Filled.Fullscreen,
@@ -680,6 +693,8 @@ fun MVPCompareScreen() {
                                     zoomPercent = providerZoom,
                                     desktopMode = desktopMode,
                                     reloadToken = reloadToken,
+                                    backRequestToken = backToken,
+                                    onCanGoBackChanged = { canGoBack = it },
                                         onUrlChanged = { newUrl ->
                                             // Keep the tracked URL in sync with actual navigations
                                             paneUrls[provider.key] = newUrl
@@ -772,6 +787,9 @@ fun MVPCompareScreen() {
                     val providerZoom = paneZoom[provider.key] ?: provider.defaultZoom
 
                     var menuOpen by remember { mutableStateOf(false) }
+                    // Back state for fullscreen pane
+                    var backToken by remember(provider.key) { mutableStateOf(0) }
+                    var canGoBack by remember(provider.key) { mutableStateOf(false) }
 
                     Card(
                         modifier = Modifier
@@ -797,6 +815,15 @@ fun MVPCompareScreen() {
                                 )
 
                                 Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
+                                        IconButton(onClick = { backToken += 1 }, enabled = canGoBack, modifier = Modifier.size(28.dp)) {
+                                            Icon(
+                                                imageVector = Icons.Filled.ArrowBack,
+                                                contentDescription = "Go back",
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
                                     IconButton(onClick = { fullScreenPane = null }, modifier = Modifier.size(28.dp)) {
         						Icon(
                                             Icons.Filled.FullscreenExit,
@@ -865,6 +892,8 @@ fun MVPCompareScreen() {
                                     zoomPercent = providerZoom,
                                     desktopMode = desktopMode,
                                     reloadToken = reloadToken,
+                                    backRequestToken = backToken,
+                                    onCanGoBackChanged = { canGoBack = it },
                                     onUrlChanged = { newUrl ->
                                         paneUrls[provider.key] = newUrl
                                     },
