@@ -16,13 +16,14 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.horizontalScroll
+// removed unused import horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
-import androidx.compose.material.icons.filled.Search
+// removed unused import Search icon
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material.icons.filled.Store
@@ -221,12 +222,35 @@ private fun CompactSearchField(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MVPCompareScreen() {
-    val providers = remember { MVP_PROVIDERS } // Blinkit, Zepto, Instamart
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     // Preferences for persisting selection across sessions
     val prefs = remember { context.getSharedPreferences("oc_prefs", Context.MODE_PRIVATE) }
+
+    val baseProviders = remember { MVP_PROVIDERS } // Blinkit, Zepto, Instamart
+    // Mutable list of user-added custom providers (persisted)
+    val customProviders = remember { mutableStateListOf<Provider>() }
+    // Load custom providers once
+    LaunchedEffect(Unit) {
+        val saved = prefs.getStringSet("customProviders", emptySet()) ?: emptySet()
+        val loaded = saved.mapNotNull { raw ->
+            // Format: key||displayName||urlTemplate||homeUrl||defaultZoom
+            val parts = raw.split("||")
+            try {
+                val key = parts.getOrNull(0) ?: return@mapNotNull null
+                val name = parts.getOrNull(1) ?: return@mapNotNull null
+                val url = parts.getOrNull(2) ?: return@mapNotNull null
+                val home = parts.getOrNull(3)
+                val zoom = parts.getOrNull(4)?.toIntOrNull() ?: 50
+                Provider(key = key, displayName = name, urlTemplate = url, homeUrl = home, defaultZoom = zoom)
+            } catch (_: Exception) { null }
+        }
+        customProviders.clear()
+        customProviders.addAll(loaded)
+    }
+    // Combined providers list (base + custom)
+    val providers = remember(customProviders.size) { baseProviders + customProviders.toList() }
 
     // 1) What the user is typing
     var queryField by remember { mutableStateOf(TextFieldValue("")) }
@@ -349,6 +373,15 @@ fun MVPCompareScreen() {
 
     // Initialize per-pane URL on first composition
     LaunchedEffect(Unit) {
+        providers.forEach { p ->
+            paneUrls.putIfAbsent(p.key, p.home())
+            paneDesktop.putIfAbsent(p.key, false)
+            paneReload.putIfAbsent(p.key, 0)
+            paneZoom.putIfAbsent(p.key, p.defaultZoom)
+        }
+    }
+    // Ensure new custom providers added later get initialized
+    LaunchedEffect(customProviders.size) {
         providers.forEach { p ->
             paneUrls.putIfAbsent(p.key, p.home())
             paneDesktop.putIfAbsent(p.key, false)
@@ -960,16 +993,103 @@ fun MVPCompareScreen() {
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Text(p.displayName)
-                                    Checkbox(
-                                        checked = tempMarketplaceSelection.contains(p.key),
-                                        onCheckedChange = { checked ->
-                                            val next = tempMarketplaceSelection.toMutableSet()
-                                            if (checked) next.add(p.key) else next.remove(p.key)
-                                            tempMarketplaceSelection = next
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                                        Text(p.displayName, modifier = Modifier.weight(1f))
+                                    }
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        // Remove button for custom providers
+                                        val isCustom = customProviders.any { it.key == p.key }
+                                        if (isCustom) {
+                                            IconButton(onClick = {
+                                                // Remove from custom list and selections; persist
+                                                val idx = customProviders.indexOfFirst { it.key == p.key }
+                                                if (idx >= 0) customProviders.removeAt(idx)
+                                                val nextSel = tempMarketplaceSelection.toMutableSet()
+                                                nextSel.remove(p.key)
+                                                tempMarketplaceSelection = nextSel
+                                            }) {
+                                                Icon(
+                                                    imageVector = Icons.Filled.Delete,
+                                                    contentDescription = "Remove provider",
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
                                         }
-                                    )
+                                        Checkbox(
+                                            checked = tempMarketplaceSelection.contains(p.key),
+                                            onCheckedChange = { checked ->
+                                                val next = tempMarketplaceSelection.toMutableSet()
+                                                if (checked) next.add(p.key) else next.remove(p.key)
+                                                tempMarketplaceSelection = next
+                                            }
+                                        )
+                                    }
                                 }
+                            }
+
+                            Spacer(Modifier.height(12.dp))
+                            // Add custom provider button
+                            var showAddDialog by remember { mutableStateOf(false) }
+                            Button(onClick = { showAddDialog = true }, modifier = Modifier.align(Alignment.End)) { Text("Add Provider") }
+
+                            if (showAddDialog) {
+                                var newName by remember { mutableStateOf("") }
+                                var newUrl by remember { mutableStateOf("") }
+                                var errorText by remember { mutableStateOf<String?>(null) }
+                                AlertDialog(
+                                    onDismissRequest = { showAddDialog = false },
+                                    title = { Text("Add Custom Provider") },
+                                    text = {
+                                        Column(
+                                            Modifier
+                                                .fillMaxWidth()
+                                        ) {
+                                            OutlinedTextField(
+                                                value = newName,
+                                                onValueChange = { newName = it },
+                                                label = { Text("Provider Name") },
+                                                singleLine = true,
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                            Spacer(Modifier.height(8.dp))
+                                            OutlinedTextField(
+                                                value = newUrl,
+                                                onValueChange = { newUrl = it },
+                                                label = { Text("URL Template") },
+                                                singleLine = true,
+                                                placeholder = { Text("https://example.com/search?q={query}") },
+                                                modifier = Modifier.fillMaxWidth()
+                                            )
+                                            Spacer(Modifier.height(6.dp))
+                                            Text("Use {query} as the placeholder for the search term", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            if (errorText != null) {
+                                                Spacer(Modifier.height(6.dp))
+                                                Text(errorText!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                                            }
+                                        }
+                                    },
+                                    confirmButton = {
+                                        TextButton(onClick = {
+                                            val name = newName.trim()
+                                            val url = newUrl.trim()
+                                            val valid = name.isNotEmpty() && url.isNotEmpty() && (url.contains("{query}") || url.contains("{QUERY}"))
+                                            if (!valid) {
+                                                errorText = "Enter a name and a URL containing {query}"
+                                                return@TextButton
+                                            }
+                                            val safe = name.lowercase(Locale.getDefault()).replace("[^a-z0-9]+".toRegex(), "_")
+                                            val key = "custom_${'$'}safe_${'$'}{System.currentTimeMillis()}"
+                                            val p = Provider(key = key, displayName = name, urlTemplate = url, homeUrl = null, defaultZoom = 50)
+                                            customProviders.add(p)
+                                            // Select by default in temp selection
+                                            val nextSel = tempMarketplaceSelection.toMutableSet(); nextSel.add(key); tempMarketplaceSelection = nextSel
+                                            showAddDialog = false
+                                        }) { Text("Add Provider") }
+                                    },
+                                    dismissButton = {
+                                        TextButton(onClick = { showAddDialog = false }) { Text("Cancel") }
+                                    }
+                                )
                             }
                             
                             Spacer(Modifier.height(16.dp))
@@ -1015,10 +1135,15 @@ fun MVPCompareScreen() {
                                 fullScreenPane = null
                             }
                             // Persist selection
+                            // Persist custom providers too
+                            val serialized = customProviders.map { cp ->
+                                listOf(cp.key, cp.displayName, cp.urlTemplate, cp.homeUrl ?: "", cp.defaultZoom.toString()).joinToString("||")
+                            }.toSet()
                             prefs.edit()
                                 .putStringSet("selectedProviders", selectedProviders)
                                 .putInt("gridColumns", gridColumns)
                                 .putInt("gridHeight", gridHeight)
+                                .putStringSet("customProviders", serialized)
                                 .apply()
                             showMarketplaceDialog = false
                         }) { Text("Save") }
