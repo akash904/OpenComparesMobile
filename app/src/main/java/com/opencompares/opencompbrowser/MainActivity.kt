@@ -12,6 +12,7 @@ import android.location.LocationManager
 import android.os.Bundle
 import android.util.TypedValue
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.GeolocationPermissions
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -60,12 +61,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var heightControlPanel: LinearLayout
     private lateinit var locationDisplay: TextView
     private lateinit var locationDisplayRow: LinearLayout
+    private lateinit var columnToggleButton: Button
     
     private var controlsVisible = true // Toggle state for controls visibility
     private var activeTabIndex = 0
     private val tabZoomLevels = mutableListOf<Int>()
     private var defaultTabHeightDp = 430
     private val webViewContainers = mutableListOf<FrameLayout>()
+    private var columnsPerRow = 2 // Default to 2 columns
     
     private lateinit var searchViewModel: SearchViewModel
     
@@ -121,6 +124,7 @@ class MainActivity : AppCompatActivity() {
         heightControlPanel = findViewById(R.id.heightControlPanel)
         locationDisplay = findViewById(R.id.locationDisplay)
         locationDisplayRow = findViewById(R.id.locationDisplayRow)
+        columnToggleButton = findViewById(R.id.columnToggleButton)
         
         // Set up button listeners
         setupButtons()
@@ -133,6 +137,9 @@ class MainActivity : AppCompatActivity() {
         
         // Request location permission
         requestLocationPermission()
+        
+        // Initialize column toggle button text
+        updateColumnToggleButton()
         
         // Initialize tabs from marketplaces
         initializeMarketplaceTabs()
@@ -391,9 +398,9 @@ class MainActivity : AppCompatActivity() {
         webViewContainer.addView(webView)
         webViewContainers.add(webViewContainer)
         
-        // Add WebView to appropriate row
-        val rowIndex = tabIndex / 2
-        val isFirstInRow = tabIndex % 2 == 0
+        // Add WebView to appropriate row based on column count
+        val rowIndex = tabIndex / columnsPerRow
+        val isFirstInRow = tabIndex % columnsPerRow == 0
         
         if (isFirstInRow) {
             val row = LinearLayout(this).apply {
@@ -521,6 +528,58 @@ class MainActivity : AppCompatActivity() {
         
         settingsToggleButton.setOnClickListener {
             toggleControlsVisibility()
+        }
+        
+        columnToggleButton.setOnClickListener {
+            toggleColumnLayout()
+        }
+    }
+    
+    private fun toggleColumnLayout() {
+        columnsPerRow = if (columnsPerRow == 2) 1 else 2
+        updateColumnToggleButton()
+        rebuildGridLayout()
+    }
+    
+    private fun updateColumnToggleButton() {
+        columnToggleButton.text = if (columnsPerRow == 1) "1 Column" else "2 Columns"
+    }
+    
+    private fun rebuildGridLayout() {
+        // Store current WebView containers
+        val containers = webViewContainers.toList()
+        
+        // Remove all containers from their parent views first
+        containers.forEach { container ->
+            val parent = container.parent as? ViewGroup
+            parent?.removeView(container)
+        }
+        
+        // Clear the container list and remove all views
+        webViewContainers.clear()
+        webViewsContainer.removeAllViews()
+        
+        // Rebuild the grid with new column layout
+        containers.forEachIndexed { index, container ->
+            val rowIndex = index / columnsPerRow
+            val isFirstInRow = index % columnsPerRow == 0
+            
+            if (isFirstInRow) {
+                val row = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    layoutParams = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    )
+                }
+                row.addView(container)
+                webViewsContainer.addView(row)
+            } else {
+                val row = webViewsContainer.getChildAt(rowIndex) as LinearLayout
+                row.addView(container)
+            }
+            
+            webViewContainers.add(container)
         }
     }
     

@@ -261,6 +261,36 @@
 
     </LinearLayout>
 
+    <!-- Column Layout Toggle -->
+    <LinearLayout
+        android:id="@+id/columnLayoutPanel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="8dp"
+        android:background="@android:color/white"
+        android:elevation="2dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Grid Layout:"
+            android:textSize="14sp"
+            android:textColor="@android:color/black"
+            android:layout_gravity="center_vertical"
+            android:layout_marginEnd="8dp" />
+
+        <Button
+            android:id="@+id/columnToggleButton"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="2 Columns"
+            android:textSize="14sp"
+            android:backgroundTint="@android:color/holo_blue_light" />
+
+    </LinearLayout>
+
     <!-- WebViews Grid Container -->
     <com.opencompares.opencompbrowser.WebViewAwareScrollView
         android:id="@+id/gridScrollView"
