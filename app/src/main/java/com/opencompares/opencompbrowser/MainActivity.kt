@@ -3,9 +3,7 @@ package com.opencompares.opencompbrowser
 import android.graphics.Color
 import android.os.Bundle
 import android.util.TypedValue
-import android.view.MotionEvent
 import android.view.View
-import android.view.ViewGroup
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -16,13 +14,19 @@ import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
+import androidx.activity.OnBackPressedCallback
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 
 class MainActivity : AppCompatActivity() {
     
     private val webViews = mutableListOf<WebView>()
     private val tabButtons = mutableListOf<Button>()
-    private lateinit var addressBar: EditText
-    private lateinit var goButton: ImageButton
+    private val tabMarketplaces = mutableListOf<Marketplace>() // Store marketplace for each tab
+    private lateinit var searchBar: EditText
+    private lateinit var searchButton: Button
     private lateinit var backButton: ImageButton
     private lateinit var forwardButton: ImageButton
     private lateinit var refreshButton: ImageButton
@@ -33,30 +37,50 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tabButtonsContainer: LinearLayout
     private lateinit var webViewsContainer: LinearLayout
     private lateinit var addTabButton: Button
+    private lateinit var navigationBar: LinearLayout
+    private lateinit var currentUrlDisplay: TextView
     
     private var activeTabIndex = 0
-    private val tabZoomLevels = mutableListOf<Int>() // Store zoom level for each tab (100 = 100%)
-    private var defaultTabHeightDp = 300 // Default height for each tab row in dp (mutable)
-    private val webViewContainers = mutableListOf<FrameLayout>() // Store containers to resize them
-    private val defaultUrls = listOf(
-        "https://www.google.com",
-        "https://www.github.com",
-        "https://www.stackoverflow.com",
-        "https://www.wikipedia.org"
-    )
+    private val tabZoomLevels = mutableListOf<Int>()
+    private var defaultTabHeightDp = 300
+    private val webViewContainers = mutableListOf<FrameLayout>()
+    
+    private lateinit var searchViewModel: SearchViewModel
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         
+        // Initialize ViewModel
+        searchViewModel = ViewModelProvider(this)[SearchViewModel::class.java]
+        
+        // Handle back button press
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                getActiveWebView()?.let { activeWebView ->
+                    if (activeWebView.canGoBack()) {
+                        activeWebView.goBack()
+                    } else {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                    }
+                } ?: run {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                }
+            }
+        })
+        
         // Initialize container views
         tabButtonsContainer = findViewById(R.id.tabButtonsContainer)
         webViewsContainer = findViewById(R.id.webViewsContainer)
         addTabButton = findViewById(R.id.addTabButton)
+        navigationBar = findViewById(R.id.navigationBar)
+        currentUrlDisplay = findViewById(R.id.currentUrlDisplay)
         
-        // Initialize other views
-        addressBar = findViewById(R.id.addressBar)
-        goButton = findViewById(R.id.goButton)
+        // Initialize views
+        searchBar = findViewById(R.id.searchBar)
+        searchButton = findViewById(R.id.searchButton)
         backButton = findViewById(R.id.backButton)
         forwardButton = findViewById(R.id.forwardButton)
         refreshButton = findViewById(R.id.refreshButton)
@@ -74,9 +98,17 @@ class MainActivity : AppCompatActivity() {
         // Set up height slider
         setupHeightSlider()
         
-        // Add initial 4 tabs
-        for (i in 0 until 4) {
-            addTab(defaultUrls.getOrNull(i) ?: "about:blank")
+        // Initialize tabs from marketplaces
+        initializeMarketplaceTabs()
+        
+        // Observe search query changes
+        observeSearchQuery()
+    }
+    
+    private fun initializeMarketplaceTabs() {
+        val marketplaces = searchViewModel.marketplaces.value
+        marketplaces.forEach { marketplace ->
+            addMarketplaceTab(marketplace)
         }
         
         // Set first tab as active
@@ -85,12 +117,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
     
-    private fun addTab(url: String = "about:blank") {
+    private fun addMarketplaceTab(marketplace: Marketplace, query: String = "") {
         val tabIndex = webViews.size
         
         // Create tab button
         val tabButton = Button(this).apply {
-            text = "Tab ${tabIndex + 1}"
+            text = marketplace.name
             textSize = 12f
             layoutParams = LinearLayout.LayoutParams(
                 0,
@@ -107,15 +139,15 @@ class MainActivity : AppCompatActivity() {
         }
         tabButtonsContainer.addView(tabButton)
         tabButtons.add(tabButton)
+        tabMarketplaces.add(marketplace)
         
-        // Create WebView wrapped in a FrameLayout for better scroll handling
+        // Create WebView container
         val webViewContainer = FrameLayout(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 0,
                 dpToPx(defaultTabHeightDp),
                 1f
             )
-            // Don't intercept touch events - let them pass through to WebView
             isClickable = false
             isFocusable = false
         }
@@ -125,28 +157,24 @@ class MainActivity : AppCompatActivity() {
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
             )
-            // Disable nested scrolling to prevent conflicts with grid scrolling
             isNestedScrollingEnabled = false
             overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-            // Enable vertical scrolling with visible scrollbar
             isVerticalScrollBarEnabled = true
             isHorizontalScrollBarEnabled = true
             scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
-            // Ensure WebView can receive touch events
             isClickable = true
             isFocusable = true
             isFocusableInTouchMode = true
         }
         
         webViewContainer.addView(webView)
-        webViewContainers.add(webViewContainer) // Store container for resizing
+        webViewContainers.add(webViewContainer)
         
         // Add WebView to appropriate row
         val rowIndex = tabIndex / 2
         val isFirstInRow = tabIndex % 2 == 0
         
         if (isFirstInRow) {
-            // Create new row
             val row = LinearLayout(this).apply {
                 orientation = LinearLayout.HORIZONTAL
                 layoutParams = LinearLayout.LayoutParams(
@@ -157,35 +185,41 @@ class MainActivity : AppCompatActivity() {
             row.addView(webViewContainer)
             webViewsContainer.addView(row)
         } else {
-            // Add to existing row
             val row = webViewsContainer.getChildAt(rowIndex) as LinearLayout
             row.addView(webViewContainer)
         }
         
         webViews.add(webView)
-        tabZoomLevels.add(100) // Default zoom level
+        tabZoomLevels.add(100)
         
         // Configure WebView
-        setupWebView(webView, tabIndex)
+        setupWebView(webView)
         
-        // Load URL
-        if (url != "about:blank") {
-            webView.loadUrl(url)
+        // Load initial URL or search query
+        if (query.isNotEmpty()) {
+            loadSearchQuery(marketplace, query, webView)
+        } else {
+            // Load marketplace homepage or default page
+            webView.loadUrl(marketplace.urlTemplate.replace("{query}", ""))
         }
     }
     
-    private fun setupWebView(webView: WebView, tabIndex: Int) {
+    private fun loadSearchQuery(marketplace: Marketplace, query: String, webView: WebView) {
+        val searchUrl = marketplace.getSearchUrl(query)
+        webView.loadUrl(searchUrl)
+    }
+    
+    private fun setupWebView(webView: WebView) {
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
-            loadWithOverviewMode = false // Don't fit to screen, allow scrolling
+            loadWithOverviewMode = false
             useWideViewPort = true
             builtInZoomControls = true
             displayZoomControls = false
             setSupportZoom(true)
         }
         
-        // Ensure WebView can scroll its content independently
         webView.isNestedScrollingEnabled = false
         webView.isVerticalScrollBarEnabled = true
         webView.isHorizontalScrollBarEnabled = true
@@ -195,19 +229,15 @@ class MainActivity : AppCompatActivity() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 url?.let {
-                    // Reapply zoom for this tab
                     view?.let { wv ->
                         val index = webViews.indexOf(wv)
                         if (index >= 0 && index < tabZoomLevels.size) {
                             applyZoomToWebView(wv, tabZoomLevels[index])
                         }
                         
-                        // Update address bar only if this is the active tab
-                        getActiveWebView()?.let { activeWebView ->
-                            if (wv == activeWebView) {
-                                addressBar.setText(it)
-                                updateNavigationButtons()
-                            }
+                        if (wv == getActiveWebView()) {
+                            currentUrlDisplay.text = it
+                            updateNavigationButtons()
                         }
                     }
                 }
@@ -216,12 +246,12 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun setupButtons() {
-        goButton.setOnClickListener {
-            loadUrlFromAddressBar()
+        searchButton.setOnClickListener {
+            performSearch()
         }
         
-        addressBar.setOnEditorActionListener { _, _, _ ->
-            loadUrlFromAddressBar()
+        searchBar.setOnEditorActionListener { _, _, _ ->
+            performSearch()
             true
         }
         
@@ -246,8 +276,50 @@ class MainActivity : AppCompatActivity() {
         }
         
         addTabButton.setOnClickListener {
-            addTab()
+            // Show dialog to add marketplace (for future enhancement)
+            // For now, just add a new marketplace tab
+            val newMarketplace = Marketplace(
+                id = "custom_${System.currentTimeMillis()}",
+                name = "Custom",
+                urlTemplate = "https://www.google.com/search?q={query}"
+            )
+            addMarketplaceTab(newMarketplace, searchViewModel.currentQuery.value)
         }
+    }
+    
+    private fun performSearch() {
+        val query = searchBar.text.toString().trim()
+        if (query.isEmpty()) {
+            return
+        }
+        
+        // Update ViewModel
+        searchViewModel.setQuery(query)
+        searchViewModel.setSearching(true)
+        
+        // Update all tabs with the search query
+        webViews.forEachIndexed { index, webView ->
+            if (index < tabMarketplaces.size) {
+                val marketplace = tabMarketplaces[index]
+                loadSearchQuery(marketplace, query, webView)
+            }
+        }
+        
+        // Hide keyboard
+        val imm = getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+        imm.hideSoftInputFromWindow(searchBar.windowToken, 0)
+        
+        searchViewModel.setSearching(false)
+    }
+    
+    private fun observeSearchQuery() {
+        searchViewModel.currentQuery
+            .onEach { query ->
+                if (query.isNotEmpty() && searchBar.text.toString() != query) {
+                    searchBar.setText(query)
+                }
+            }
+            .launchIn(lifecycleScope)
     }
     
     private fun setupZoomSlider() {
@@ -258,7 +330,7 @@ class MainActivity : AppCompatActivity() {
         zoomSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser && webViews.isNotEmpty()) {
-                    val zoomPercent = progress + 50 // Convert 0-150 to 50-200
+                    val zoomPercent = progress + 50
                     if (activeTabIndex < tabZoomLevels.size) {
                         tabZoomLevels[activeTabIndex] = zoomPercent
                         applyZoomToActiveTab(zoomPercent)
@@ -268,21 +340,17 @@ class MainActivity : AppCompatActivity() {
             }
             
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
     }
     
     private fun setupHeightSlider() {
-        // Set initial height slider value (range is 150-600dp, default 300dp)
-        // SeekBar max is 450, so we offset by 150
         heightSlider.progress = defaultTabHeightDp - 150
         heightValue.text = "${defaultTabHeightDp}dp"
         
         heightSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
                 if (fromUser) {
-                    // Convert progress (0-450) to height (150-600dp)
                     val heightDp = progress + 150
                     defaultTabHeightDp = heightDp
                     heightValue.text = "${heightDp}dp"
@@ -291,7 +359,6 @@ class MainActivity : AppCompatActivity() {
             }
             
             override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            
             override fun onStopTrackingTouch(seekBar: SeekBar?) {}
         })
     }
@@ -314,17 +381,14 @@ class MainActivity : AppCompatActivity() {
     }
     
     private fun applyZoomToWebView(webView: WebView, zoomPercent: Int) {
-        // Use JavaScript to apply CSS zoom to zoom everything (images, layout, text)
         val zoomFactor = zoomPercent / 100.0
         val javascript = """
             (function() {
-                // Remove existing zoom style if any
                 var existingStyle = document.getElementById('webview-zoom-style');
                 if (existingStyle) {
                     existingStyle.remove();
                 }
                 
-                // Create and inject zoom style
                 var style = document.createElement('style');
                 style.id = 'webview-zoom-style';
                 style.innerHTML = 'html, body { zoom: $zoomFactor !important; }';
@@ -334,7 +398,6 @@ class MainActivity : AppCompatActivity() {
                     document.documentElement.appendChild(style);
                 }
                 
-                // Also set zoom directly on document element for better compatibility
                 if (document.documentElement) {
                     document.documentElement.style.zoom = '$zoomFactor';
                 }
@@ -353,20 +416,21 @@ class MainActivity : AppCompatActivity() {
         activeTabIndex = index
         updateActiveTabUI()
         
-        // Update address bar with current URL
         getActiveWebView()?.let { activeWebView ->
-            addressBar.setText(activeWebView.url ?: "")
+            currentUrlDisplay.text = activeWebView.url ?: ""
             updateNavigationButtons()
         }
         
-        // Update zoom slider to reflect active tab's zoom level
+        // Show navigation bar when a tab is active
+        navigationBar.visibility = View.VISIBLE
+        
         updateZoomSlider()
     }
     
     private fun updateZoomSlider() {
         if (webViews.isNotEmpty() && activeTabIndex < tabZoomLevels.size) {
             val currentZoom = tabZoomLevels[activeTabIndex]
-            zoomSlider.progress = currentZoom - 50 // Convert 50-200 range to 0-150
+            zoomSlider.progress = currentZoom - 50
             zoomValue.text = "$currentZoom%"
             applyZoomToActiveTab(currentZoom)
         }
@@ -375,10 +439,10 @@ class MainActivity : AppCompatActivity() {
     private fun updateActiveTabUI() {
         tabButtons.forEachIndexed { index, button ->
             if (index == activeTabIndex) {
-                button.setBackgroundColor(Color.parseColor("#2196F3")) // Blue for active
+                button.setBackgroundColor(Color.parseColor("#2196F3"))
                 button.setTextColor(Color.WHITE)
             } else {
-                button.setBackgroundColor(Color.parseColor("#757575")) // Gray for inactive
+                button.setBackgroundColor(Color.parseColor("#757575"))
                 button.setTextColor(Color.WHITE)
             }
         }
@@ -389,28 +453,6 @@ class MainActivity : AppCompatActivity() {
             webViews[activeTabIndex]
         } else {
             null
-        }
-    }
-    
-    private fun loadUrlFromAddressBar() {
-        var url = addressBar.text.toString().trim()
-        
-        if (url.isEmpty()) {
-            return
-        }
-        
-        // Add protocol if missing
-        if (!url.startsWith("http://") && !url.startsWith("https://")) {
-            url = "https://$url"
-        }
-        
-        loadUrl(url)
-    }
-    
-    private fun loadUrl(url: String) {
-        getActiveWebView()?.let { webView ->
-            webView.loadUrl(url)
-            addressBar.setText(url)
         }
     }
     
@@ -430,15 +472,5 @@ class MainActivity : AppCompatActivity() {
             dp.toFloat(),
             resources.displayMetrics
         ).toInt()
-    }
-    
-    override fun onBackPressed() {
-        getActiveWebView()?.let { activeWebView ->
-            if (activeWebView.canGoBack()) {
-                activeWebView.goBack()
-            } else {
-                super.onBackPressed()
-            }
-        } ?: super.onBackPressed()
     }
 }
