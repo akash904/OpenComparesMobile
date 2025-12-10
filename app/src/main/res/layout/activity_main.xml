@@ -11,7 +11,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="12dp"
+        android:padding="6dp"
         android:background="#E8DAFF"
         android:elevation="4dp">
 
@@ -19,30 +19,43 @@
         <EditText
             android:id="@+id/searchBar"
             android:layout_width="0dp"
-            android:layout_height="56dp"
+            android:layout_height="40dp"
             android:layout_weight="1"
             android:hint="@string/search_hint"
             android:inputType="text"
             android:imeOptions="actionSearch"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
             android:background="@android:drawable/edit_text"
-            android:textSize="16sp"
+            android:textSize="14sp"
             android:textColor="@android:color/black"
             android:textColorHint="@android:color/darker_gray"
-            android:layout_marginEnd="8dp" />
+            android:layout_marginEnd="6dp"
+            android:minHeight="40dp" />
 
         <!-- Search Button -->
         <Button
             android:id="@+id/searchButton"
             android:layout_width="wrap_content"
-            android:layout_height="56dp"
+            android:layout_height="40dp"
             android:text="@string/search"
-            android:textSize="14sp"
-            android:paddingStart="24dp"
-            android:paddingEnd="24dp"
+            android:textSize="12sp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
             android:backgroundTint="#9C27B0"
-            android:textColor="@android:color/white" />
+            android:textColor="@android:color/white"
+            android:layout_marginEnd="6dp"
+            android:minHeight="40dp" />
+
+        <!-- Settings Toggle Button -->
+        <ImageButton
+            android:id="@+id/settingsToggleButton"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@android:drawable/ic_menu_preferences"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/settings"
+            android:padding="8dp" />
 
     </LinearLayout>
 
@@ -134,8 +147,39 @@
         android:layout_margin="4dp"
         android:backgroundTint="@android:color/holo_green_light" />
 
+    <!-- Location Display -->
+    <LinearLayout
+        android:id="@+id/locationDisplayRow"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:padding="8dp"
+        android:background="@android:color/white"
+        android:elevation="1dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="📍"
+            android:textSize="16sp"
+            android:layout_gravity="center_vertical"
+            android:layout_marginEnd="8dp" />
+
+        <TextView
+            android:id="@+id/locationDisplay"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="@string/getting_location"
+            android:textSize="12sp"
+            android:textColor="@android:color/darker_gray"
+            android:layout_gravity="center_vertical" />
+
+    </LinearLayout>
+
     <!-- Zoom Control -->
     <LinearLayout
+        android:id="@+id/zoomControlPanel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -157,15 +201,15 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:max="150"
-            android:progress="100"
+            android:max="70"
+            android:progress="15"
             android:layout_gravity="center_vertical" />
 
         <TextView
             android:id="@+id/zoomValue"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="100%"
+            android:text="65%"
             android:textSize="14sp"
             android:textColor="@android:color/black"
             android:layout_gravity="center_vertical"
@@ -177,6 +221,7 @@
 
     <!-- Tab Height Control -->
     <LinearLayout
+        android:id="@+id/heightControlPanel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -199,14 +244,14 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:max="450"
-            android:progress="300"
+            android:progress="280"
             android:layout_gravity="center_vertical" />
 
         <TextView
             android:id="@+id/heightValue"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="300dp"
+            android:text="430dp"
             android:textSize="14sp"
             android:textColor="@android:color/black"
             android:layout_gravity="center_vertical"
