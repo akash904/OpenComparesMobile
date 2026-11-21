@@ -35,14 +35,35 @@ val MVP_PROVIDERS = listOf(
         displayName = "Blinkit",
         urlTemplate = "https://blinkit.com/s/?q={QUERY}",
         homeUrl = "https://blinkit.com/",
-        defaultZoom = 50
+        defaultZoom = 70
     ),
     Provider(
         key = "zepto",
         displayName = "Zepto",
         urlTemplate = "https://www.zeptonow.com/search?query={QUERY}",
         homeUrl = "https://www.zeptonow.com/",
-        defaultZoom = 50
+        defaultZoom = 65
+    ),
+    Provider(
+        key = "amazon_now",
+        displayName = "Amazon Now",
+        urlTemplate = "https://www.amazon.in/tez/browse/search?searchKeyword={QUERY}",
+        homeUrl = "https://www.amazon.in/tez/browse",
+        defaultZoom = 70
+    ),
+    Provider(
+        key = "flipkart_minutes",
+        displayName = "Flipkart Minutes",
+        urlTemplate = "https://www.flipkart.com/search?q={QUERY}&otracker=search&otracker1=search&marketplace=HYPERLOCAL",
+        homeUrl = "https://www.flipkart.com/flipkart-minutes-store?marketplace=HYPERLOCAL",
+        defaultZoom = 70
+    ),
+    Provider(
+        key = "jiomart",
+        displayName = "JioMart",
+        urlTemplate = "https://www.jiomart.com/search?q={QUERY}",
+        homeUrl = "https://www.jiomart.com/",
+        defaultZoom = 70
     ),
 
     // Marketplace additions
@@ -51,14 +72,14 @@ val MVP_PROVIDERS = listOf(
         displayName = "Amazon.in",
         urlTemplate = "https://www.amazon.in/s?k={QUERY}",
         homeUrl = "https://www.amazon.in/",
-        defaultZoom = 50
+        defaultZoom = 90
     ),
     Provider(
         key = "flipkart",
         displayName = "Flipkart",
         urlTemplate = "https://www.flipkart.com/search?q={QUERY}",
         homeUrl = "https://www.flipkart.com/",
-        defaultZoom = 50
+        defaultZoom = 65
     ),
     Provider(
         key = "meesho",

@@ -25,6 +25,7 @@ import androidx.compose.ui.viewinterop.AndroidView
  * - Applies UA based on desktopMode (+ per-provider mobile UA when not desktop)
  * - Keeps WebView scrollable inside Compose grids
  * - Can force reload when reloadToken changes
+ * - Hands drags the page can't use to its container (see ScrollChainingWebView)
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -39,7 +40,10 @@ fun OpenComparesWebView(
     onGeoPrompt: (origin: String, respond: (allow: Boolean) -> Unit) -> Unit,
     backRequestToken: Int,             // bump this int to request a back navigation
     onCanGoBackChanged: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    // Receives drags the page can't use, so they move the surrounding grid.
+    // Null (fullscreen) means the WebView keeps every drag.
+    scrollChain: ScrollChainTarget? = null
 ) {
     val systemUa = remember { mutableStateOf<String?>(null) }
     // A modern desktop Chrome UA to request desktop sites reliably
@@ -57,7 +61,8 @@ fun OpenComparesWebView(
     AndroidView(
         modifier = modifier,
         factory = { ctx ->
-            WebView(ctx).apply {
+            ScrollChainingWebView(ctx).apply {
+                chainTarget = scrollChain
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.databaseEnabled = true
@@ -276,6 +281,8 @@ fun OpenComparesWebView(
             }
         },
         update = { wv ->
+            wv.chainTarget = scrollChain
+
             // Apply UA on updates (e.g., desktopMode toggled)
             val sys = systemUa.value ?: wv.settings.userAgentString
             val desiredUa = when {

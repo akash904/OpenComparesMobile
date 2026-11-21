@@ -11,10 +11,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.gestures.ScrollableDefaults
+import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.foundation.rememberScrollState
 // removed unused import horizontalScroll
 import androidx.compose.foundation.verticalScroll
@@ -63,6 +61,7 @@ import android.location.Geocoder
 import android.os.Build
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -372,6 +371,34 @@ fun MVPCompareScreen() {
     val paneReload = remember { mutableStateMapOf<String, Int>() }
     val paneZoom = remember { mutableStateMapOf<String, Int>() }
 
+    // Grid scrolling. Panes keep their own touches, so when a page is already at its
+    // top or bottom they forward the rest of the drag here to move the grid instead.
+    val gridScrollState = rememberScrollState()
+    val gridFlingBehavior = ScrollableDefaults.flingBehavior()
+    val gridScope = rememberCoroutineScope()
+    val gridScrollChain = remember(gridScrollState, gridFlingBehavior, gridScope) {
+        object : ScrollChainTarget {
+            override fun onTouchDown() {
+                if (gridScrollState.isScrollInProgress) {
+                    gridScope.launch { gridScrollState.stopScroll() }
+                }
+            }
+
+            // Finger moving up (negative) scrolls the grid forward.
+            override fun onUnconsumedDrag(fingerDy: Float) {
+                gridScrollState.dispatchRawDelta(-fingerDy)
+            }
+
+            override fun onUnconsumedFling(fingerVelocityY: Float) {
+                gridScope.launch {
+                    gridScrollState.scroll {
+                        with(gridFlingBehavior) { performFling(-fingerVelocityY) }
+                    }
+                }
+            }
+        }
+    }
+
     // Initialize per-pane URL on first composition
     LaunchedEffect(Unit) {
         providers.forEach { p ->
@@ -572,14 +599,24 @@ fun MVPCompareScreen() {
                         Text("No marketplaces selected", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(gridColumns),
-                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.fillMaxSize()
+                // A plain (non-lazy) grid: every selected pane stays composed, so its
+                // WebView keeps its page, scroll position and login while off screen.
+                // A lazy grid destroyed off-screen WebViews and reloaded them on return.
+                Row(Modifier.fillMaxSize()) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .verticalScroll(gridScrollState)
+                        .padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    items(visibleProviders, key = { it.key }) { provider ->
+                    visibleProviders.chunked(gridColumns).forEach { rowProviders ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                    rowProviders.forEach { provider -> key(provider.key) {
                         val currentUrl = paneUrls[provider.key] ?: provider.home()
                         val desktopMode = paneDesktop[provider.key] ?: false
                         val reloadToken = paneReload[provider.key] ?: 0
@@ -588,7 +625,7 @@ fun MVPCompareScreen() {
                         var menuOpen by remember { mutableStateOf(false) }
 
                         Card(
-                            modifier = Modifier.fillMaxWidth().height(gridHeight.dp),
+                            modifier = Modifier.weight(1f).height(gridHeight.dp),
                             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                         ) {
                             Column(Modifier.fillMaxSize()) {
@@ -707,15 +744,20 @@ fun MVPCompareScreen() {
                                             pendingGeoResponder = respond
                                             siteRequestingGeo = origin
                                         },
-                                        modifier = Modifier.fillMaxSize()
+                                        modifier = Modifier.fillMaxSize(),
+                                        scrollChain = gridScrollChain
                                     )
                                 }
                                 }
                             }
                         }
+                    } }
+                    // Keep a short last row's panes the same width as full rows
+                    repeat(gridColumns - rowProviders.size) { Spacer(Modifier.weight(1f)) }
+                    }
                     }
                     // Footer at end of grid
-                    item(span = { GridItemSpan(maxLineSpan) }) {
+                    Column {
                         val locationText = addressText ?: "Location: unavailable"
                         Spacer(Modifier.height(4.dp))
                         Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 2.dp) {
@@ -775,6 +817,9 @@ fun MVPCompareScreen() {
                             }
                         }
                     }
+                }
+                // Always-available scroll handle; see GridScrollbar.
+                GridScrollbar(gridScrollState)
                 }
                 }
             } else {
