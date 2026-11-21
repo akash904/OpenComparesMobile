@@ -59,66 +59,6 @@
 
     </LinearLayout>
 
-    <!-- Navigation Bar (for active tab) -->
-    <LinearLayout
-        android:id="@+id/navigationBar"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:padding="8dp"
-        android:background="@android:color/white"
-        android:elevation="2dp"
-        android:visibility="gone">
-
-        <!-- Back Button -->
-        <ImageButton
-            android:id="@+id/backButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:src="@android:drawable/ic_media_previous"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/back"
-            android:padding="12dp"
-            android:layout_marginEnd="4dp" />
-
-        <!-- Forward Button -->
-        <ImageButton
-            android:id="@+id/forwardButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:src="@android:drawable/ic_media_next"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/forward"
-            android:padding="12dp"
-            android:layout_marginEnd="4dp" />
-
-        <!-- Refresh Button -->
-        <ImageButton
-            android:id="@+id/refreshButton"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:src="@android:drawable/ic_menu_rotate"
-            android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="@string/refresh"
-            android:padding="12dp"
-            android:layout_marginEnd="4dp" />
-
-        <!-- Current URL Display -->
-        <TextView
-            android:id="@+id/currentUrlDisplay"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:textSize="12sp"
-            android:textColor="@android:color/darker_gray"
-            android:gravity="center_vertical"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:singleLine="true"
-            android:ellipsize="end" />
-
-    </LinearLayout>
-
     <!-- Tab Indicators Container -->
     <HorizontalScrollView
         android:layout_width="match_parent"
@@ -137,15 +77,15 @@
 
     </HorizontalScrollView>
 
-    <!-- Add Tab Button -->
+    <!-- Manage Marketplace Button -->
     <Button
-        android:id="@+id/addTabButton"
+        android:id="@+id/manageMarketplaceButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/add_tab"
+        android:text="@string/manage_marketplace"
         android:textSize="14sp"
         android:layout_margin="4dp"
-        android:backgroundTint="@android:color/holo_green_light" />
+        android:backgroundTint="@android:color/holo_blue_light" />
 
     <!-- Location Display -->
     <LinearLayout

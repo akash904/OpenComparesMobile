@@ -11,7 +11,10 @@
     <string name="tab_4">Tab 4</string>
     <string name="zoom">Zoom:</string>
     <string name="add_tab">+ Add Tab</string>
+    <string name="manage_marketplace">Manage Marketplaces</string>
     <string name="tab_height">Tab Height:</string>
+    <string name="select_marketplaces">Select Marketplaces</string>
+    <string name="done">Done</string>
     <string name="search_hint">Search products (e.g., potato, eggs 30)</string>
     <string name="search">Search</string>
     <string name="settings">Settings</string>

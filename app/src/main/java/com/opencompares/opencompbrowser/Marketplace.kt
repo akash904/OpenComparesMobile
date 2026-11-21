@@ -4,6 +4,8 @@ data class Marketplace(
     val id: String,
     val name: String,
     val urlTemplate: String,
+    val homepage: String,
+    val defaultZoom: Int = 65,
     val isEnabled: Boolean = true
 ) {
     fun getSearchUrl(query: String): String {

@@ -18,12 +18,15 @@ import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -44,18 +47,13 @@ class MainActivity : AppCompatActivity() {
     private val tabMarketplaces = mutableListOf<Marketplace>() // Store marketplace for each tab
     private lateinit var searchBar: EditText
     private lateinit var searchButton: Button
-    private lateinit var backButton: ImageButton
-    private lateinit var forwardButton: ImageButton
-    private lateinit var refreshButton: ImageButton
     private lateinit var zoomSlider: SeekBar
     private lateinit var zoomValue: TextView
     private lateinit var heightSlider: SeekBar
     private lateinit var heightValue: TextView
     private lateinit var tabButtonsContainer: LinearLayout
     private lateinit var webViewsContainer: LinearLayout
-    private lateinit var addTabButton: Button
-    private lateinit var navigationBar: LinearLayout
-    private lateinit var currentUrlDisplay: TextView
+    private lateinit var manageMarketplaceButton: Button
     private lateinit var settingsToggleButton: ImageButton
     private lateinit var zoomControlPanel: LinearLayout
     private lateinit var heightControlPanel: LinearLayout
@@ -105,17 +103,12 @@ class MainActivity : AppCompatActivity() {
         // Initialize container views
         tabButtonsContainer = findViewById(R.id.tabButtonsContainer)
         webViewsContainer = findViewById(R.id.webViewsContainer)
-        addTabButton = findViewById(R.id.addTabButton)
-        navigationBar = findViewById(R.id.navigationBar)
-        currentUrlDisplay = findViewById(R.id.currentUrlDisplay)
+        manageMarketplaceButton = findViewById(R.id.manageMarketplaceButton)
         
         // Initialize views
         searchBar = findViewById(R.id.searchBar)
         searchButton = findViewById(R.id.searchButton)
         settingsToggleButton = findViewById(R.id.settingsToggleButton)
-        backButton = findViewById(R.id.backButton)
-        forwardButton = findViewById(R.id.forwardButton)
-        refreshButton = findViewById(R.id.refreshButton)
         zoomSlider = findViewById(R.id.zoomSlider)
         zoomValue = findViewById(R.id.zoomValue)
         heightSlider = findViewById(R.id.heightSlider)
@@ -330,7 +323,7 @@ class MainActivity : AppCompatActivity() {
     
     private fun initializeMarketplaceTabs() {
         val marketplaces = searchViewModel.marketplaces.value
-        marketplaces.forEach { marketplace ->
+        marketplaces.filter { it.isEnabled }.forEach { marketplace ->
             addMarketplaceTab(marketplace)
         }
         
@@ -418,7 +411,7 @@ class MainActivity : AppCompatActivity() {
         }
         
         webViews.add(webView)
-        tabZoomLevels.add(65) // Default zoom 65%
+        tabZoomLevels.add(marketplace.defaultZoom) // Use marketplace default zoom
         
         // Configure WebView
         setupWebView(webView)
@@ -432,8 +425,8 @@ class MainActivity : AppCompatActivity() {
         if (query.isNotEmpty()) {
             loadSearchQuery(marketplace, query, webView)
         } else {
-            // Load marketplace homepage or default page
-            webView.loadUrl(marketplace.urlTemplate.replace("{query}", ""))
+            // Load marketplace homepage
+            webView.loadUrl(marketplace.homepage)
         }
     }
     
@@ -475,10 +468,7 @@ class MainActivity : AppCompatActivity() {
                             applyZoomToWebView(wv, tabZoomLevels[index])
                         }
                         
-                        if (wv == getActiveWebView()) {
-                            currentUrlDisplay.text = it
-                            updateNavigationButtons()
-                        }
+                        // URL updated for active tab
                     }
                 }
             }
@@ -495,35 +485,8 @@ class MainActivity : AppCompatActivity() {
             true
         }
         
-        backButton.setOnClickListener {
-            getActiveWebView()?.let { activeWebView ->
-                if (activeWebView.canGoBack()) {
-                    activeWebView.goBack()
-                }
-            }
-        }
-        
-        forwardButton.setOnClickListener {
-            getActiveWebView()?.let { activeWebView ->
-                if (activeWebView.canGoForward()) {
-                    activeWebView.goForward()
-                }
-            }
-        }
-        
-        refreshButton.setOnClickListener {
-            getActiveWebView()?.reload()
-        }
-        
-        addTabButton.setOnClickListener {
-            // Show dialog to add marketplace (for future enhancement)
-            // For now, just add a new marketplace tab
-            val newMarketplace = Marketplace(
-                id = "custom_${System.currentTimeMillis()}",
-                name = "Custom",
-                urlTemplate = "https://www.google.com/search?q={query}"
-            )
-            addMarketplaceTab(newMarketplace, searchViewModel.currentQuery.value)
+        manageMarketplaceButton.setOnClickListener {
+            showManageMarketplaceDialog()
         }
         
         settingsToggleButton.setOnClickListener {
@@ -532,6 +495,129 @@ class MainActivity : AppCompatActivity() {
         
         columnToggleButton.setOnClickListener {
             toggleColumnLayout()
+        }
+    }
+    
+    private fun showManageMarketplaceDialog() {
+        val marketplaces = searchViewModel.marketplaces.value
+        val dialogView = ScrollView(this).apply {
+            val container = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16))
+            }
+            
+            val checkboxes = mutableListOf<CheckBox>()
+            marketplaces.forEach { marketplace ->
+                val checkBox = CheckBox(context).apply {
+                    text = marketplace.name
+                    isChecked = marketplace.isEnabled
+                    textSize = 16f
+                    setPadding(dpToPx(8), dpToPx(12), dpToPx(8), dpToPx(12))
+                }
+                checkboxes.add(checkBox)
+                container.addView(checkBox)
+            }
+            
+            addView(container)
+        }
+        
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.select_marketplaces))
+            .setView(dialogView)
+            .setPositiveButton(getString(R.string.done)) { _, _ ->
+                val marketplaces = searchViewModel.marketplaces.value
+                val updatedMarketplaces = marketplaces.mapIndexed { index, marketplace ->
+                    val checkBox = (dialogView.getChildAt(0) as LinearLayout).getChildAt(index) as CheckBox
+                    marketplace.copy(isEnabled = checkBox.isChecked)
+                }
+                
+                searchViewModel.updateMarketplaces(updatedMarketplaces)
+                syncTabsWithMarketplaces(updatedMarketplaces)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+    
+    private fun syncTabsWithMarketplaces(marketplaces: List<Marketplace>) {
+        val enabledMarketplaces = marketplaces.filter { it.isEnabled }
+        val enabledMarketplaceIds = enabledMarketplaces.map { it.id }.toSet()
+        
+        // Create a map of marketplace ID to enabled state
+        val marketplaceEnabledMap = marketplaces.associateBy({ it.id }, { it.isEnabled })
+        
+        // Remove tabs for disabled marketplaces (check current tabs against updated list)
+        val tabsToRemove = mutableListOf<Int>()
+        tabMarketplaces.forEachIndexed { index, marketplace ->
+            val isEnabled = marketplaceEnabledMap[marketplace.id] ?: false
+            if (!isEnabled) {
+                tabsToRemove.add(index)
+            }
+        }
+        
+        // Remove from end to avoid index shifting issues
+        tabsToRemove.reversed().forEach { index ->
+            removeTab(index)
+        }
+        
+        // Add tabs for newly enabled marketplaces (in order from marketplace list)
+        enabledMarketplaces.forEach { marketplace ->
+            val existingTabIndex = tabMarketplaces.indexOfFirst { it.id == marketplace.id }
+            if (existingTabIndex == -1) {
+                // Marketplace not in tabs, add it
+                addMarketplaceTab(marketplace, searchViewModel.currentQuery.value)
+            }
+        }
+        
+        // Rebuild grid layout to maintain proper column structure
+        rebuildGridLayout()
+        
+        // Update active tab index if current tab was removed
+        if (activeTabIndex >= webViews.size && webViews.isNotEmpty()) {
+            setActiveTab(webViews.size - 1)
+        } else if (webViews.isEmpty()) {
+            activeTabIndex = 0
+        } else {
+            // Update UI for current active tab
+            updateActiveTabUI()
+        }
+    }
+    
+    private fun removeTab(index: Int) {
+        if (index < 0 || index >= webViews.size) return
+        
+        // Remove tab button
+        if (index < tabButtons.size) {
+            tabButtonsContainer.removeView(tabButtons[index])
+            tabButtons.removeAt(index)
+        }
+        
+        // Remove WebView container from grid
+        if (index < webViewContainers.size) {
+            val container = webViewContainers[index]
+            val parent = container.parent as? ViewGroup
+            parent?.removeView(container)
+            
+            // If parent row is now empty, remove it
+            if (parent is LinearLayout && parent.childCount == 0) {
+                val rowParent = parent.parent as? ViewGroup
+                rowParent?.removeView(parent)
+            }
+            
+            webViewContainers.removeAt(index)
+        }
+        
+        // Remove WebView
+        if (index < webViews.size) {
+            webViews[index].destroy()
+            webViews.removeAt(index)
+        }
+        
+        // Remove marketplace and zoom level
+        if (index < tabMarketplaces.size) {
+            tabMarketplaces.removeAt(index)
+        }
+        if (index < tabZoomLevels.size) {
+            tabZoomLevels.removeAt(index)
         }
     }
     
@@ -586,23 +672,25 @@ class MainActivity : AppCompatActivity() {
     private fun toggleControlsVisibility() {
         controlsVisible = !controlsVisible
         
+        val columnLayoutPanel = findViewById<LinearLayout>(R.id.columnLayoutPanel)
+        
         if (controlsVisible) {
             // Show all controls
-            navigationBar.visibility = View.VISIBLE
             tabButtonsContainer.visibility = View.VISIBLE
-            addTabButton.visibility = View.VISIBLE
+            manageMarketplaceButton.visibility = View.VISIBLE
             locationDisplayRow.visibility = View.VISIBLE
             zoomControlPanel.visibility = View.VISIBLE
             heightControlPanel.visibility = View.VISIBLE
+            columnLayoutPanel.visibility = View.VISIBLE
             settingsToggleButton.setImageResource(android.R.drawable.ic_menu_preferences)
         } else {
             // Hide all controls
-            navigationBar.visibility = View.GONE
             tabButtonsContainer.visibility = View.GONE
-            addTabButton.visibility = View.GONE
+            manageMarketplaceButton.visibility = View.GONE
             locationDisplayRow.visibility = View.GONE
             zoomControlPanel.visibility = View.GONE
             heightControlPanel.visibility = View.GONE
+            columnLayoutPanel.visibility = View.GONE
             settingsToggleButton.setImageResource(android.R.drawable.ic_menu_view)
         }
     }
@@ -738,14 +826,7 @@ class MainActivity : AppCompatActivity() {
         activeTabIndex = index
         updateActiveTabUI()
         
-        getActiveWebView()?.let { activeWebView ->
-            currentUrlDisplay.text = activeWebView.url ?: ""
-            updateNavigationButtons()
-        }
-        
-        // Show navigation bar when a tab is active
-        navigationBar.visibility = View.VISIBLE
-        
+        // Tab is now active
         updateZoomSlider()
     }
     
@@ -785,16 +866,6 @@ class MainActivity : AppCompatActivity() {
             webViews[activeTabIndex]
         } else {
             null
-        }
-    }
-    
-    private fun updateNavigationButtons() {
-        getActiveWebView()?.let { activeWebView ->
-            backButton.isEnabled = activeWebView.canGoBack()
-            forwardButton.isEnabled = activeWebView.canGoForward()
-        } ?: run {
-            backButton.isEnabled = false
-            forwardButton.isEnabled = false
         }
     }
     
