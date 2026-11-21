@@ -3,6 +3,7 @@ package com.opencompares.android
 import android.annotation.SuppressLint
 import android.os.Build
 import android.view.MotionEvent
+import android.view.View
 import android.webkit.GeolocationPermissions
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -68,16 +69,25 @@ fun OpenComparesWebView(
                 settings.loadsImagesAutomatically = true
                 settings.cacheMode = WebSettings.LOAD_DEFAULT
                 settings.useWideViewPort = true
-                settings.loadWithOverviewMode = true
+                settings.loadWithOverviewMode = false
                 settings.mediaPlaybackRequiresUserGesture = false
+                // Enable geolocation
+                settings.setGeolocationEnabled(true)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     settings.setOffscreenPreRaster(true)
                 }
                 
-                // Apply initial zoom settings
-                settings.setSupportZoom(true)
-                settings.builtInZoomControls = false
-                settings.displayZoomControls = false
+                // Nested scrolling and scrollbar settings
+                isNestedScrollingEnabled = false
+                overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+                isVerticalScrollBarEnabled = true
+                isHorizontalScrollBarEnabled = true
+                scrollBarStyle = View.SCROLLBARS_INSIDE_OVERLAY
+                
+                // Focus and clickability settings
+                isClickable = true
+                isFocusable = true
+                isFocusableInTouchMode = true
                 
 //                 // Apply initial zoom immediately
 //                 val initialScale = 2 / 100.0
