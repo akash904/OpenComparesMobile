@@ -78,6 +78,9 @@ class PaneWebViewStore {
         return view
     }
 
+    /** The live WebView for a pane, if it has one. Callers must not keep the reference. */
+    fun view(key: String): PaneWebView? = views[key]?.takeUnless { it.isDestroyed }
+
     /** Frees panes whose marketplace is no longer selected. */
     fun retainOnly(keys: Set<String>) {
         views.keys.filterNot { it in keys }.forEach { key -> views.remove(key)?.destroyNow() }

@@ -16,6 +16,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.opencompares.android.data.AppSettings
 import com.opencompares.android.data.SettingsRepository
+import com.opencompares.android.prices.PaneReadResult
+import com.opencompares.android.prices.PriceReader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -123,6 +125,32 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
         private set
 
     private val panes = mutableStateMapOf<String, PaneState>()
+
+    private val priceReader = PriceReader(application)
+
+    /** Latest prices read from the panes, in pane order. Empty until the first read. */
+    var priceResults by mutableStateOf<List<PaneReadResult>>(emptyList())
+        private set
+
+    var readingPrices by mutableStateOf(false)
+        private set
+
+    /** Reads product cards from every visible pane, on the device, without any AI. */
+    fun readPrices(store: PaneWebViewStore) {
+        if (readingPrices) return
+        readingPrices = true
+        val views = visibleProviders.associate { p ->
+            // A crashed pane has no usable page.
+            p.key to store.view(p.key)?.takeUnless { pane(p).error?.kind == PaneError.Kind.Crashed }
+        }
+        viewModelScope.launch {
+            try {
+                priceResults = priceReader.readAll(views)
+            } finally {
+                readingPrices = false
+            }
+        }
+    }
 
     init {
         viewModelScope.launch {
