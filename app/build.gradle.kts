@@ -27,6 +27,11 @@ android {
             )
             signingConfig = signingConfigs.getByName("debug")
         }
+        debug {
+            // Installs next to the release app instead of clashing with its signature.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
