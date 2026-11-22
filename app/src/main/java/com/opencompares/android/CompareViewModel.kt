@@ -1,6 +1,7 @@
 package com.opencompares.android
 
 import android.app.Application
+import android.content.pm.ApplicationInfo
 import android.location.Address
 import android.location.Geocoder
 import android.location.Location
@@ -24,6 +25,8 @@ import com.opencompares.android.prices.ComparisonParser
 import com.opencompares.android.prices.ComparisonPrompts
 import com.opencompares.android.prices.PaneReadResult
 import com.opencompares.android.prices.PriceReader
+import com.opencompares.android.shopping.PaneDriver
+import com.opencompares.android.shopping.ShoppingSession
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -58,7 +61,9 @@ data class PaneState(
     val progress: Int = 0,
     val error: PaneError? = null,
     /** Bumped to build a fresh WebView after the old one's renderer died. */
-    val instanceId: Int = 0
+    val instanceId: Int = 0,
+    /** Counts finished page loads, so code driving the pane can wait for the next one. */
+    val loads: Int = 0
 ) {
     fun navigate(url: String) = copy(navUrl = url, navId = navId + 1, error = null)
 
@@ -71,7 +76,7 @@ data class PaneState(
     fun started() = copy(loading = true, progress = 0, error = null)
 
     fun finished(url: String, canGoBack: Boolean) =
-        copy(currentUrl = url, canGoBack = canGoBack, loading = false, progress = 100)
+        copy(currentUrl = url, canGoBack = canGoBack, loading = false, progress = 100, loads = loads + 1)
 
     fun failed(url: String, errorCode: Int) =
         copy(error = PaneError(errorKindFor(errorCode), url), loading = false)
@@ -160,6 +165,36 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
     private var compareJob: Job? = null
 
     private var lastReadAtMillis = 0L
+
+    /** The shopping chat on the landing screen. */
+    val shopping = ShoppingSession(
+        viewModelScope,
+        chatGpt,
+        priceReader,
+        debugLog = application.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+    )
+
+    /** Searches every visible pane for each item on the shopping list. */
+    fun findBestPrices(store: PaneWebViewStore) {
+        // Every pane must be on screen (under the chat) to load and render its results.
+        fullScreenPane = null
+        shopping.findBestPrices(object : PaneDriver {
+            override val siteKeys = visibleProviders
+                .filter { pane(it).error?.kind != PaneError.Kind.Crashed }
+                .map { it.key }
+
+            override fun siteName(key: String) = providers.firstOrNull { it.key == key }?.displayName ?: key
+
+            override fun searchUrl(key: String, query: String) =
+                providers.firstOrNull { it.key == key }?.buildUrl(query)
+
+            override fun navigate(key: String, url: String) = updatePane(key) { it.navigate(url) }
+
+            override fun loads(key: String) = panes[key]?.loads ?: 0
+
+            override fun view(key: String) = store.view(key)
+        })
+    }
 
     /**
      * Opening the prices sheet reads the panes afresh, unless a comparison of a recent

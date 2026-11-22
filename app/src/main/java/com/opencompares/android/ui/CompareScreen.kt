@@ -29,7 +29,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.LocalOffer
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.ZoomIn
@@ -161,6 +163,8 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
     var showSettings by remember { mutableStateOf(false) }
     var showChatGpt by remember { mutableStateOf(false) }
     var showPrices by rememberSaveable { mutableStateOf(false) }
+    // The app opens on the shopping chat; the sites are one tap away underneath it.
+    var showChat by rememberSaveable { mutableStateOf(true) }
     val chatGptViewModel: ChatGptViewModel = viewModel()
     val chatGptState by chatGptViewModel.state.collectAsStateWithLifecycle()
     val runSearch: () -> Unit = {
@@ -193,19 +197,29 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
                 },
                 actions = {
                     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
-                        IconButton(
-                            onClick = {
-                                showPrices = true
-                                viewModel.openPrices(store)
-                            },
-                            modifier = Modifier.size(32.dp)
-                        ) {
+                        IconButton(onClick = { showChat = !showChat }, modifier = Modifier.size(32.dp)) {
                             Icon(
-                                Icons.Filled.LocalOffer,
-                                contentDescription = "Read prices",
+                                if (showChat) Icons.Filled.GridView else Icons.AutoMirrored.Filled.Chat,
+                                contentDescription = if (showChat) "Show sites" else "Shopping chat",
                                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
                                 modifier = Modifier.size(18.dp)
                             )
+                        }
+                        if (!showChat) {
+                            IconButton(
+                                onClick = {
+                                    showPrices = true
+                                    viewModel.openPrices(store)
+                                },
+                                modifier = Modifier.size(32.dp)
+                            ) {
+                                Icon(
+                                    Icons.Filled.LocalOffer,
+                                    contentDescription = "Read prices",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                         IconButton(onClick = { showChatGpt = true }, modifier = Modifier.size(32.dp)) {
                             Icon(
@@ -216,11 +230,13 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
                             )
                         }
                     }
-                    ZoomControls(
-                        zoom = viewModel.globalZoom,
-                        onZoomOut = viewModel::zoomOut,
-                        onZoomIn = viewModel::zoomIn
-                    )
+                    if (!showChat) {
+                        ZoomControls(
+                            zoom = viewModel.globalZoom,
+                            onZoomOut = viewModel::zoomOut,
+                            onZoomIn = viewModel::zoomIn
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer,
@@ -229,49 +245,67 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
             )
         }
     ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
-            SearchBar(
-                query = viewModel.query,
-                onQueryChange = { viewModel.query = it },
-                onSearch = runSearch,
-                onOpenSettings = { showSettings = true }
-            )
-
-            HorizontalDivider(
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
-            )
-
-            val fullScreenProvider = viewModel.fullScreenPane?.let { key ->
-                viewModel.visibleProviders.firstOrNull { it.key == key }
-            }
-            when {
-                // Saved settings are still loading; drawing nothing avoids building default panes.
-                settings == null -> Unit
-
-                fullScreenProvider != null -> MarketplacePane(
-                    provider = fullScreenProvider,
-                    pane = viewModel.pane(fullScreenProvider),
-                    isFullscreen = true,
-                    store = store,
-                    viewModel = viewModel,
-                    scrollChain = null,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
+        Box(Modifier.padding(padding).fillMaxSize()) {
+            Column(Modifier.fillMaxSize()) {
+                SearchBar(
+                    query = viewModel.query,
+                    onQueryChange = { viewModel.query = it },
+                    onSearch = runSearch,
+                    onOpenSettings = { showSettings = true }
                 )
 
-                viewModel.visibleProviders.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("No marketplaces selected", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+                )
 
-                else -> MarketplaceGrid(
-                    viewModel = viewModel,
-                    settings = settings,
-                    store = store,
-                    scrollState = gridScrollState,
-                    scrollChain = gridScrollChain,
-                    onRequestLocation = requestLocation
+                val fullScreenProvider = viewModel.fullScreenPane?.let { key ->
+                    viewModel.visibleProviders.firstOrNull { it.key == key }
+                }
+                when {
+                    // Saved settings are still loading; drawing nothing avoids building default panes.
+                    settings == null -> Unit
+
+                    fullScreenProvider != null -> MarketplacePane(
+                        provider = fullScreenProvider,
+                        pane = viewModel.pane(fullScreenProvider),
+                        isFullscreen = true,
+                        store = store,
+                        viewModel = viewModel,
+                        scrollChain = null,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+
+                    viewModel.visibleProviders.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("No marketplaces selected", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+
+                    else -> MarketplaceGrid(
+                        viewModel = viewModel,
+                        settings = settings,
+                        store = store,
+                        scrollState = gridScrollState,
+                        scrollChain = gridScrollChain,
+                        onRequestLocation = requestLocation
+                    )
+                }
+            }
+
+            // Drawn over the panes, which stay laid out so a shopping run can search in them.
+            if (showChat) {
+                ShoppingChat(
+                    session = viewModel.shopping,
+                    signedIn = (chatGptState as? AccountState.SignedIn)?.hasPlanUsage == true,
+                    siteName = { key -> viewModel.providers.firstOrNull { it.key == key }?.displayName ?: key },
+                    onSignIn = { showChatGpt = true },
+                    onFindPrices = { viewModel.findBestPrices(store) },
+                    onOpenOffer = { key, url ->
+                        viewModel.openOffer(key, url)
+                        showChat = false
+                    },
+                    modifier = Modifier.fillMaxSize()
                 )
             }
         }

@@ -33,6 +33,9 @@ class OffersTest {
         // Zepto shows sizes like this.
         assertEquals(Quantity(500.0, Quantity.BaseUnit.MILLILITRE), q("1 pack (500 ml)"))
         assertEquals(Quantity(1000.0, Quantity.BaseUnit.MILLILITRE), q("1 pack (1 L)"))
+        // Zepto eggs: a piece count says more than "pack".
+        assertEquals(Quantity(6.0, Quantity.BaseUnit.PIECE), q("1 pack (6 pcs)"))
+        assertEquals(Quantity(1.0, Quantity.BaseUnit.PIECE), q("1 pack"))
     }
 
     @Test

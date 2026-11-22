@@ -47,6 +47,10 @@ class PriceReader(context: Context) {
         views.map { (key, view) -> async { readOne(key, view, js) } }.awaitAll()
     }
 
+    /** Reads one pane. */
+    suspend fun read(key: String, view: WebView?): PaneReadResult =
+        readOne(key, view, withContext(Dispatchers.IO) { script })
+
     private suspend fun readOne(key: String, view: WebView?, js: String): PaneReadResult {
         if (view == null) return PaneReadResult.NotLoaded(key)
         val raw = withTimeoutOrNull(READ_TIMEOUT_MS) { evaluate(view, js) }

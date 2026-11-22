@@ -25,9 +25,13 @@ data class Quantity(val amount: Double, val unit: BaseUnit) {
          */
         fun parse(text: String?): Quantity? {
             if (text.isNullOrBlank()) return null
-            // "1 pack (500 ml)": a weight or volume says more than a pack or piece count.
+            // "1 pack (500 ml)": a weight or volume says more than a pack or piece count,
+            // and "1 pack (6 pcs)": a piece count says more than "pack".
             val matches = PATTERN.findAll(text).toList()
-            val m = matches.firstOrNull { isWeightOrVolume(it.groupValues[3]) } ?: matches.firstOrNull() ?: return null
+            val m = matches.firstOrNull { isWeightOrVolume(it.groupValues[3]) }
+                ?: matches.firstOrNull { !it.groupValues[3].equals("pack", ignoreCase = true) }
+                ?: matches.firstOrNull()
+                ?: return null
             val first = m.groupValues[1].toDoubleOrNull() ?: return null
             val second = m.groupValues[2].toDoubleOrNull()
             val trailingCount = m.groupValues[4].toDoubleOrNull()

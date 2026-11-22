@@ -21,6 +21,7 @@
   var NOISE_LINE_RE = /^(?:add|add to cart|add to bag|sponsored|ad|bestseller|new|options?|\d+ options?|view similar|save for later|buy now|notify me|\+|−|-)$/i;
   // Cart and checkout bars carry a price but are not products.
   var NOT_A_PRODUCT_RE = /^(?:view cart|go to cart|cart|proceed|checkout|place order|pay|total|subtotal|bill details|item total)\b/i;
+  var QTY_ALL_RE = new RegExp(QTY_RE.source, "gi");
   var WEIGHT_VOLUME_RE = /\d\s?(?:x\s?\d+(?:\.\d+)?\s?)?(?:g|gm|gms|grams?|kg|kgs|ml|l|ltr|litres?|liters?)\b/i;
   var LOGIN_RE = /\blog ?in\b|\bsign ?in\b/i;
 
@@ -119,7 +120,7 @@
     PRICE_IN_TEXT_RE.lastIndex = 0;
     if (hasPrice) return false;
     if (NOISE_LINE_RE.test(line) || DISCOUNT_RE.test(line) || ETA_RE.test(line) && line.length < 14) return false;
-    if (QTY_RE.test(line) && line.replace(QTY_RE, "").replace(/[^a-z]/gi, "").length < 3) return false;
+    if (QTY_RE.test(line) && line.replace(QTY_ALL_RE, "").replace(/[^a-z]/gi, "").length < 3) return false;
     return !/^[\d.,\s()★☆%]+$/.test(line); // ratings, counts
   }
 
@@ -158,7 +159,7 @@
     for (var j = 0; j < lines.length; j++) {
       var line = lines[j].trim();
       if (line === name || line.length > 40 || !QTY_RE.test(line)) continue;
-      var sizeOnly = line.replace(QTY_RE, "").replace(/[^a-z]/gi, "").length <= 6;
+      var sizeOnly = line.replace(QTY_ALL_RE, "").replace(/[^a-z]/gi, "").length <= 6;
       var rank = (sizeOnly ? 2 : 0) + (WEIGHT_VOLUME_RE.test(line) ? 1 : 0);
       if (rank > bestRank) { best = line; bestRank = rank; }
     }
