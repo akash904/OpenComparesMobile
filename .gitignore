@@ -1,13 +1,16 @@
 *.iml
 .gradle
 /local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+# Android Studio settings are per machine and can record device serial numbers.
+/.idea/
 .DS_Store
+# Signed release builds (.aab/.apk) are build outputs, not source.
+/app/release/
+*.aab
+*.apk
+# Signing keys must never be committed.
+*.jks
+*.keystore
 /build
 /captures
 .externalNativeBuild
