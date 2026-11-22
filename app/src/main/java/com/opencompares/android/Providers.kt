@@ -21,6 +21,69 @@ data class Provider(
     fun home(): String = homeUrl ?: buildUrl("")
 }
 
+/**
+ * Stores user-added providers as strings: key||name||urlTemplate||homeUrl||zoom.
+ * This is the format earlier versions already saved, so existing data keeps loading.
+ */
+object CustomProviderCodec {
+    private const val SEP = "||"
+
+    fun encode(p: Provider): String =
+        listOf(p.key, p.displayName, p.urlTemplate, p.homeUrl ?: "", p.defaultZoom.toString())
+            .joinToString(SEP) { it.replace(SEP, "|") }
+
+    /** Returns null for entries that are missing a key, a name or a URL template. */
+    fun decode(raw: String): Provider? {
+        val parts = raw.split(SEP)
+        val key = parts.getOrNull(0)?.takeIf { it.isNotBlank() } ?: return null
+        val name = parts.getOrNull(1)?.takeIf { it.isNotBlank() } ?: return null
+        val url = parts.getOrNull(2)?.takeIf { it.isNotBlank() } ?: return null
+        // Older versions saved a missing homepage as "", which then loaded a blank page.
+        val home = parts.getOrNull(3)?.takeIf { it.isNotBlank() }
+        val zoom = parts.getOrNull(4)?.toIntOrNull()?.coerceIn(5, 100) ?: 50
+        return Provider(key = key, displayName = name, urlTemplate = url, homeUrl = home, defaultZoom = zoom)
+    }
+
+    /**
+     * Decodes a saved set in a stable order and makes every key unique.
+     * Older versions gave every custom provider the same literal key, so
+     * clashes with a built-in or an earlier custom provider get a numbered suffix.
+     */
+    fun decodeAll(raw: Set<String>, reservedKeys: Set<String> = MVP_PROVIDERS.map { it.key }.toSet()): List<Provider> {
+        val used = reservedKeys.toMutableSet()
+        return raw.mapNotNull(::decode)
+            .sortedWith(compareBy({ it.key }, { it.displayName }))
+            .map { p ->
+                var key = p.key
+                var n = 2
+                while (key in used) key = "${p.key}_${n++}"
+                used += key
+                p.copy(key = key)
+            }
+    }
+}
+
+/** A key for a new user-added provider that can't clash with existing keys. */
+fun newCustomProviderKey(
+    name: String,
+    existingKeys: Set<String>,
+    nowMillis: Long = System.currentTimeMillis()
+): String {
+    val safe = name.lowercase().replace("[^a-z0-9]+".toRegex(), "_").trim('_').ifEmpty { "site" }
+    var key = "custom_${safe}_$nowMillis"
+    var n = 2
+    while (key in existingKeys) key = "custom_${safe}_${nowMillis}_${n++}"
+    return key
+}
+
+/** Checks a user-entered template. Returns an error message, or null when it can be used. */
+fun validateCustomProvider(name: String, urlTemplate: String): String? = when {
+    name.isBlank() || urlTemplate.isBlank() -> "Enter a name and a URL template"
+    !urlTemplate.contains("{query}") && !urlTemplate.contains("{QUERY}") -> "The URL must contain {query}"
+    !urlTemplate.startsWith("https://") && !urlTemplate.startsWith("http://") -> "The URL must start with https://"
+    else -> null
+}
+
 val MVP_PROVIDERS = listOf(
     Provider(
         key = "instamart",

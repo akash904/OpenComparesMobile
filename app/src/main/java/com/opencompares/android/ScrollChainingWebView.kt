@@ -35,7 +35,7 @@ interface ScrollChainTarget {
  * skipped for those so the page and the grid never move together. The grid's
  * scrollbar still works for them.
  */
-class ScrollChainingWebView(context: Context) : WebView(context) {
+open class ScrollChainingWebView(context: Context) : WebView(context) {
 
     /** Receives leftover drags. Null means the page keeps every drag, as in fullscreen. */
     var chainTarget: ScrollChainTarget? = null
