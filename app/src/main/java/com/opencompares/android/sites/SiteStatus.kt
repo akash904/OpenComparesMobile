@@ -35,7 +35,9 @@ data class SiteStatus(
     val lat: Double?,
     val lon: Double?,
     /** The page is a "log in to continue" wall. */
-    val loginWall: Boolean
+    val loginWall: Boolean,
+    /** Items in the site's cart, when the app can tell. */
+    val cartCount: Int? = null
 ) {
     /** Kilometres between where the site delivers and [lat], [lon], when both are known. */
     fun distanceKmFrom(lat: Double, lon: Double): Double? {
@@ -62,7 +64,8 @@ data class SiteStatus(
             label = if (json.isNull("label")) null else json.optString("label").trim().ifEmpty { null },
             lat = json.optDouble("lat").takeIf { !it.isNaN() },
             lon = json.optDouble("lon").takeIf { !it.isNaN() },
-            loginWall = json.optBoolean("loginWall", false)
+            loginWall = json.optBoolean("loginWall", false),
+            cartCount = if (json.isNull("cartCount")) null else json.optInt("cartCount", 0)
         )
     }
 }

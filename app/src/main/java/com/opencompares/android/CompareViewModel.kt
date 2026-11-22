@@ -27,7 +27,10 @@ import com.opencompares.android.prices.ComparisonPrompts
 import com.opencompares.android.prices.PaneReadResult
 import com.opencompares.android.prices.PriceReader
 import com.opencompares.android.shopping.PaneDriver
+import com.opencompares.android.shopping.BasketResult
 import com.opencompares.android.shopping.ShoppingSession
+import com.opencompares.android.shopping.SiteCart
+import com.opencompares.android.web.PageScripts
 import com.opencompares.android.sites.FAR_AWAY_KM
 import com.opencompares.android.sites.LocationState
 import com.opencompares.android.sites.LoginState
@@ -184,6 +187,7 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope,
         chatGpt,
         priceReader,
+        PageScripts(application),
         debugLog = application.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
     )
 
@@ -322,24 +326,50 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
     fun findBestPrices(store: PaneWebViewStore) {
         // Every pane must be on screen (under the chat) to load and render its results.
         fullScreenPane = null
-        shopping.findBestPrices(object : PaneDriver {
-            override val siteKeys = visibleProviders
-                .filter { pane(it).error?.kind != PaneError.Kind.Crashed }
-                .map { it.key }
+        shopping.findBestPrices(paneDriver(store))
+    }
 
-            override fun warning(key: String) = siteWarning(key)
+    /** Puts each confirmed site's items in its cart and reads the real bills. */
+    fun fillCarts(store: PaneWebViewStore, result: BasketResult, siteKeys: List<String>) {
+        fullScreenPane = null
+        shopping.fillCarts(paneDriver(store), result, siteKeys)
+    }
 
-            override fun siteName(key: String) = providers.firstOrNull { it.key == key }?.displayName ?: key
+    /** Takes back out what the app put in one site's cart. */
+    fun emptyAdded(store: PaneWebViewStore, cart: SiteCart) {
+        fullScreenPane = null
+        shopping.emptyAdded(paneDriver(store), cart)
+    }
 
-            override fun searchUrl(key: String, query: String) =
-                providers.firstOrNull { it.key == key }?.buildUrl(query)
+    /** Shows a site's cart full screen, to check out there; without a known cart page, the site itself. */
+    fun openCart(key: String) {
+        val provider = providers.firstOrNull { it.key == key } ?: return
+        provider.cartUrl?.let { url -> updatePane(key) { it.navigate(url) } }
+        fullScreenPane = key
+    }
 
-            override fun navigate(key: String, url: String) = updatePane(key) { it.navigate(url) }
+    private fun paneDriver(store: PaneWebViewStore): PaneDriver = object : PaneDriver {
+        override val siteKeys = visibleProviders
+            .filter { pane(it).error?.kind != PaneError.Kind.Crashed }
+            .map { it.key }
 
-            override fun loads(key: String) = panes[key]?.loads ?: 0
+        override fun warning(key: String) = siteWarning(key)
 
-            override fun view(key: String) = store.view(key)
-        })
+        override fun cartUrl(key: String) = providers.firstOrNull { it.key == key }?.cartUrl
+
+        override suspend fun cartCount(key: String): Int? =
+            statusReader.read(store.view(key))?.also { siteStatus[key] = it }?.cartCount
+
+        override fun siteName(key: String) = providers.firstOrNull { it.key == key }?.displayName ?: key
+
+        override fun searchUrl(key: String, query: String) =
+            providers.firstOrNull { it.key == key }?.buildUrl(query)
+
+        override fun navigate(key: String, url: String) = updatePane(key) { it.navigate(url) }
+
+        override fun loads(key: String) = panes[key]?.loads ?: 0
+
+        override fun view(key: String) = store.view(key)
     }
 
     /**

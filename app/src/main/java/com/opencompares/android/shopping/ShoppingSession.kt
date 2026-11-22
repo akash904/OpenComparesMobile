@@ -10,6 +10,10 @@ import androidx.compose.runtime.snapshotFlow
 import com.opencompares.android.chatgpt.ChatGptAccount
 import com.opencompares.android.chatgpt.SiwcApiException
 import com.opencompares.android.prices.Offer
+import com.opencompares.android.prices.formatRupees
+import com.opencompares.android.web.PageScripts
+import com.opencompares.android.web.runPageScript
+import org.json.JSONObject
 import com.opencompares.android.prices.PageOffers
 import com.opencompares.android.prices.PaneReadResult
 import com.opencompares.android.prices.PriceReader
@@ -44,6 +48,9 @@ sealed interface ChatEntry {
         /** Says which items reused earlier results instead of being searched again. */
         val reusedNote: String? = null
     ) : ChatEntry
+
+    /** Carts the app filled, with each site's real bill. */
+    data class CartCard(override val id: Long, val comparison: CartComparison) : ChatEntry
 }
 
 /** What the assistant is busy with. */
@@ -52,6 +59,8 @@ sealed interface ShoppingWork {
     data object Thinking : ShoppingWork
     data class Searching(val itemName: String, val number: Int, val total: Int) : ShoppingWork
     data object Matching : ShoppingWork
+    /** Putting items in a site's cart, or reading its bill. */
+    data class Carting(val siteName: String, val step: String, val number: Int, val total: Int) : ShoppingWork
 }
 
 /** Lets a shopping run search in the marketplace panes. */
@@ -66,6 +75,10 @@ interface PaneDriver {
     fun view(key: String): WebView?
     /** Why this site's prices may not suit the shopper, such as another delivery address. */
     fun warning(key: String): String?
+    /** The site's cart page, if known. */
+    fun cartUrl(key: String): String?
+    /** Items already in the site's cart, read fresh from its page; null if unknown. */
+    suspend fun cartCount(key: String): Int?
 }
 
 /**
@@ -77,6 +90,7 @@ class ShoppingSession(
     private val scope: CoroutineScope,
     private val chatGpt: ChatGptAccount,
     private val reader: PriceReader,
+    private val scripts: PageScripts,
     private val debugLog: Boolean
 ) {
     val entries = mutableStateListOf<ChatEntry>()
@@ -207,6 +221,199 @@ class ShoppingSession(
     }
 
     /**
+     * Puts each chosen site's items in its cart, then reads the site's real bill. Only the
+     * sites the shopper confirmed are touched, one at a time; nothing is ever ordered.
+     */
+    fun fillCarts(driver: PaneDriver, result: BasketResult, siteKeys: List<String>) {
+        if (work != ShoppingWork.Idle || siteKeys.isEmpty()) return
+        job = scope.launch {
+            val carts = mutableListOf<SiteCart>()
+            try {
+                for (site in siteKeys) {
+                    val name = driver.siteName(site)
+                    val options = result.items.mapNotNull { plan ->
+                        plan.options.firstOrNull { it.providerKey == site }?.let { plan.item to it }
+                    }
+                    if (options.isEmpty()) continue
+                    work = ShoppingWork.Carting(name, "checking the cart", 0, options.size)
+                    val itemsBefore = driver.cartCount(site)
+                    val added = mutableListOf<AddedItem>()
+                    for ((i, pair) in options.withIndex()) {
+                        val (item, option) = pair
+                        work = ShoppingWork.Carting(name, "adding ${item.name}", i + 1, options.size)
+                        val result1 = addToCart(driver, site, item, option)
+                        added += result1
+                        // A site that wants a login won't take the rest either.
+                        if (result1.problem == LOGIN_PROBLEM) {
+                            options.drop(i + 1).forEach { (it2, o2) -> added += AddedItem(it2, o2.offer, o2.packs, 0, 0, LOGIN_PROBLEM) }
+                            break
+                        }
+                    }
+                    val anyAdded = added.any { it.inCart > 0 }
+                    val bill = if (anyAdded || (itemsBefore ?: 0) > 0) {
+                        work = ShoppingWork.Carting(name, "reading the bill", options.size, options.size)
+                        readBill(driver, site)
+                    } else null
+                    carts += SiteCart(
+                        providerKey = site,
+                        items = added,
+                        bill = bill,
+                        itemsBefore = itemsBefore,
+                        problem = when {
+                            added.all { it.problem == LOGIN_PROBLEM } -> "$name wants you to log in before it lets you add to its cart."
+                            !anyAdded -> "Nothing could be added to $name's cart."
+                            bill == null -> "Couldn't read the bill on $name's cart page."
+                            else -> null
+                        }
+                    )
+                    // A new cart can change which address or fees apply; search afresh next time.
+                    forgetSite(site)
+                }
+                add { ChatEntry.CartCard(it, CartComparison(carts, result)) }
+            } catch (e: CancellationException) {
+                if (carts.isNotEmpty()) add { ChatEntry.CartCard(it, CartComparison(carts, result)) }
+                add { ChatEntry.FromAssistant(it, "Stopped. Items already added stay in those carts.") }
+                throw e
+            } catch (e: Exception) {
+                fail(e)
+            } finally {
+                work = ShoppingWork.Idle
+            }
+        }
+    }
+
+    /** Takes out only what the app put in a site's cart; anything the shopper had stays. */
+    fun emptyAdded(driver: PaneDriver, cart: SiteCart) {
+        if (work != ShoppingWork.Idle) return
+        val name = driver.siteName(cart.providerKey)
+        job = scope.launch {
+            try {
+                work = ShoppingWork.Carting(name, "opening the cart", 0, cart.items.size)
+                if (!openCart(driver, cart.providerKey)) {
+                    add { ChatEntry.FromAssistant(it, "Couldn't open $name's cart. Remove the items in its pane.", isError = true) }
+                    return@launch
+                }
+                var removed = 0
+                cart.items.forEachIndexed { i, added ->
+                    work = ShoppingWork.Carting(name, "removing ${added.item.name}", i + 1, cart.items.size)
+                    // Cart pages draw their items a moment after loading: wait for this one.
+                    for (attempt in 0 until MAX_READS) {
+                        if (cardAction(driver, cart.providerKey, added.offer, "find", matchPrice = false)?.found == true) break
+                        delay(READ_INTERVAL_MS)
+                    }
+                    repeat(added.addedByApp) {
+                        val state = cardAction(driver, cart.providerKey, added.offer, "minus", matchPrice = false)
+                        if (state?.found == true && state.count > 0) removed++
+                        delay(STEP_DELAY_MS)
+                    }
+                }
+                add { ChatEntry.FromAssistant(it, "Took $removed item${if (removed == 1) "" else "s"} the app added out of $name's cart.") }
+                forgetSite(cart.providerKey)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                fail(e)
+            } finally {
+                work = ShoppingWork.Idle
+            }
+        }
+    }
+
+    /** Finds the product on the site's search page and sets its quantity to the packs needed. */
+    private suspend fun addToCart(driver: PaneDriver, site: String, item: WantedItem, option: ItemOption): AddedItem {
+        val page = searchSite(driver, site, item.search)
+        if (page?.needsLogin == true) return AddedItem(item, option.offer, option.packs, 0, 0, LOGIN_PROBLEM)
+        // Results can still be rendering; look once more before giving up.
+        val first = cardAction(driver, site, option.offer, "find")?.takeIf { it.found }
+            ?: run {
+                delay(STEP_DELAY_MS)
+                cardAction(driver, site, option.offer, "find")
+            }
+        if (first == null || !first.found) {
+            if (debugLog) Log.d(TAG, "$site cart: ${option.offer.name} not found on the page")
+            return AddedItem(item, option.offer, option.packs, 0, 0, "Couldn't find it on the page any more.")
+        }
+        var state: CardState = first
+        val before = state.count
+        if (state.count == 0) {
+            if (!state.canAdd) {
+                val why = if (state.outOfStock) "Out of stock now." else "No ADD button on its card."
+                return AddedItem(item, option.offer, option.packs, 0, 0, why)
+            }
+            cardAction(driver, site, option.offer, "add")
+            delay(STEP_DELAY_MS)
+            choosePack(driver, site, option.offer)
+            state = cardAction(driver, site, option.offer, "find") ?: state
+            if (state.count == 0) {
+                if (debugLog) Log.d(TAG, "$site cart: ${option.offer.name} ADD pressed but count stayed 0")
+                return AddedItem(item, option.offer, option.packs, 0, 0, "The site didn't add it. It may want you to log in.")
+            }
+        }
+        // Raise the quantity one step at a time; stop if the site stops accepting more.
+        var stuck = 0
+        while (state.count < option.packs && state.canPlus && stuck < 2) {
+            val was = state.count
+            cardAction(driver, site, option.offer, "plus")
+            delay(STEP_DELAY_MS)
+            choosePack(driver, site, option.offer)
+            state = cardAction(driver, site, option.offer, "find") ?: state
+            if (state.count <= was) stuck++ else stuck = 0
+        }
+        val problem = if (state.count < option.packs) "Only ${state.count} of ${option.packs} could be added; the site may limit how many." else null
+        if (debugLog) Log.d(TAG, "$site cart: ${option.offer.name} ${state.count}/${option.packs}")
+        return AddedItem(item, option.offer, option.packs, before, state.count, problem)
+    }
+
+    /**
+     * Some sites (Instamart) open a pack-size picker after ADD or +. If one is open, add the
+     * pack with this price in it and confirm, so the picker closes with exactly one more.
+     */
+    private suspend fun choosePack(driver: PaneDriver, site: String, offer: Offer) {
+        val pick = cardAction(driver, site, offer, "variant") ?: return
+        if (!pick.picker) return
+        if (pick.found) delay(STEP_DELAY_MS)
+        cardAction(driver, site, offer, "confirm")
+        delay(STEP_DELAY_MS)
+        if (debugLog) Log.d(TAG, "$site cart: picked the ${formatRupees(offer.price)} pack of ${offer.name} (${pick.found})")
+    }
+
+    private suspend fun cardAction(driver: PaneDriver, site: String, offer: Offer, mode: String, matchPrice: Boolean = true): CardState? {
+        val view = driver.view(site) ?: return null
+        val args = JSONObject()
+            .put("mode", mode)
+            .put("name", offer.name)
+            .put("price", if (matchPrice) formatRupees(offer.price) else "")
+        val js = scripts.load(CART_SCRIPT).replace("__OC_ARGS__", args.toString())
+        val raw = runPageScript(view, js) ?: return null
+        return runCatching { CardState.parse(JSONObject(raw)) }.getOrNull()
+    }
+
+    /** Opens the site's cart page and waits for it to load. */
+    private suspend fun openCart(driver: PaneDriver, site: String): Boolean {
+        val url = driver.cartUrl(site) ?: return false
+        val loadsBefore = driver.loads(site)
+        driver.navigate(site, url)
+        withTimeoutOrNull(PAGE_LOAD_TIMEOUT_MS) { snapshotFlow { driver.loads(site) }.first { it > loadsBefore } }
+        return true
+    }
+
+    /** Opens the cart and reads its bill, giving the page a few seconds to fill it in. */
+    private suspend fun readBill(driver: PaneDriver, site: String): Bill? {
+        if (!openCart(driver, site)) return null
+        repeat(MAX_READS) {
+            delay(READ_INTERVAL_MS)
+            val view = driver.view(site) ?: return null
+            val raw = runPageScript(view, scripts.load(BILL_SCRIPT)) ?: return@repeat
+            val bill = runCatching { BillParser.parse(JSONObject(raw)) }.getOrNull()
+            if (bill != null) {
+                if (debugLog) Log.d(TAG, "$site bill: $raw")
+                return bill
+            }
+        }
+        return null
+    }
+
+    /**
      * Has ChatGPT match only the items it hasn't matched on these exact pages before; a
      * changed amount or a fresh search counts as new. Returns matches for every item.
      */
@@ -305,6 +512,11 @@ class ShoppingSession(
         private const val READ_INTERVAL_MS = 1_500L
         private const val MAX_READS = 8
         private const val LOGIN_RETRY_DELAY_MS = 2_500L
+        /** Time for a site to update after a tap on ADD, + or -. */
+        private const val STEP_DELAY_MS = 1_500L
+        private const val CART_SCRIPT = "cart_actions.js"
+        private const val LOGIN_PROBLEM = "The site asked you to log in."
+        private const val BILL_SCRIPT = "bill_reader.js"
         /** Prices on quick-commerce sites change often; older results are searched again. */
         private const val CACHE_MS = 20 * 60 * 1000L
     }

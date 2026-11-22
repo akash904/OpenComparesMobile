@@ -96,6 +96,8 @@ class ShoppingTest {
         assertEquals(1, packsNeeded(milk, offer("Milk", 150.0, "5 l"))) // never less than one
         // 450 ml packs: 5 packs make 2.25 l.
         assertEquals(5, packsNeeded(milk, offer("Milk", 25.0, "450 ml")))
+        // Zepto sells potatoes as "900 g - 1 kg": one pack is enough for 1 kg.
+        assertEquals(1, packsNeeded(WantedItem("Potatoes", "potato", "1 kg", 1), offer("Potato", 26.0, "900 g")))
         // Grams can't cover litres, and no size means "as many as asked".
         assertEquals(2, packsNeeded(milk, offer("Milk powder", 200.0, "500 g")))
         assertEquals(3, packsNeeded(WantedItem("Maggi", "maggi", null, 3), offer("Maggi", 14.0, "70 g")))

@@ -143,12 +143,16 @@ fun packsNeeded(item: WantedItem, offer: Offer): Int {
     return packsFor(item, offer).first
 }
 
+/** A pack up to 15% short of what is wanted still counts as enough. */
+private const val PACK_TOLERANCE = 0.15
+
 /** Packs needed, and whether they come to half as much again as wanted or more. */
 private fun packsFor(item: WantedItem, offer: Offer): Pair<Int, Boolean> {
     val total = item.wantedTotal
     val pack = offer.quantity
     if (total != null && pack != null && total.unit == pack.unit && pack.amount > 0) {
-        val packs = maxOf(1, ceil(total.amount / pack.amount - 1e-9).toInt())
+        // Close enough counts: a "900 g - 1 kg" pack is one pack of the 1 kg asked for, not two.
+        val packs = maxOf(1, ceil(total.amount / pack.amount - PACK_TOLERANCE).toInt())
         return packs to (packs * pack.amount >= total.amount * 1.5)
     }
     return item.count to false

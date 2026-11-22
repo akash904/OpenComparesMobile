@@ -41,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -51,6 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.opencompares.android.prices.formatRupees
 import com.opencompares.android.shopping.BasketResult
+import com.opencompares.android.shopping.SiteCart
 import com.opencompares.android.shopping.ChatEntry
 import com.opencompares.android.shopping.ItemChange
 import com.opencompares.android.shopping.ItemOption
@@ -72,12 +74,31 @@ fun ShoppingChat(
     onSignIn: () -> Unit,
     onFindPrices: () -> Unit,
     onOpenOffer: (providerKey: String, url: String) -> Unit,
+    onFillCarts: (BasketResult, List<String>) -> Unit,
+    onOpenCart: (String) -> Unit,
+    onEmptyAdded: (SiteCart) -> Unit,
+    cartCount: (String) -> Int?,
     modifier: Modifier = Modifier,
     /** Shown under the greeting: the shopper's sites and delivery location. */
     sitesCard: @Composable () -> Unit = {}
 ) {
     val listState = rememberLazyListState()
     val work = session.work
+    val lastResultId = session.entries.lastOrNull { it is ChatEntry.ResultCard }?.id
+    // The result whose carts the shopper is about to fill, while the confirm dialog is open.
+    var confirming by remember { mutableStateOf<BasketResult?>(null) }
+    confirming?.let { result ->
+        CartConfirmDialog(
+            result = result,
+            siteName = siteName,
+            cartCount = cartCount,
+            onConfirm = { keys ->
+                confirming = null
+                onFillCarts(result, keys)
+            },
+            onDismiss = { confirming = null }
+        )
+    }
     val lastListId = session.entries.lastOrNull { it is ChatEntry.ListCard }?.id
 
     LaunchedEffect(session.entries.size, work) {
@@ -111,7 +132,22 @@ fun ShoppingChat(
                             isUpdate = session.hasResults,
                             onFindPrices = onFindPrices
                         )
-                        is ChatEntry.ResultCard -> ResultCard(entry, siteName, onOpenOffer)
+                        is ChatEntry.ResultCard -> ResultCard(
+                            entry = entry,
+                            siteName = siteName,
+                            onOpenOffer = onOpenOffer,
+                            // Only the newest prices can go in the carts; older ones may be stale.
+                            onCheckTotals = if (entry.id == lastResultId && work == ShoppingWork.Idle) {
+                                { confirming = entry.result }
+                            } else null
+                        )
+                        is ChatEntry.CartCard -> CartCard(
+                            comparison = entry.comparison,
+                            siteName = siteName,
+                            busy = work != ShoppingWork.Idle,
+                            onOpenCart = onOpenCart,
+                            onEmptyAdded = onEmptyAdded
+                        )
                     }
                 }
                 if (!signedIn) {
@@ -225,26 +261,37 @@ private fun WorkRow(work: ShoppingWork, onStop: () -> Unit) {
         ShoppingWork.Thinking -> "Reading your list…"
         is ShoppingWork.Searching -> "Searching every site for ${work.itemName} (${work.number} of ${work.total})…"
         ShoppingWork.Matching -> "ChatGPT is matching products across sites…"
+        is ShoppingWork.Carting -> "${work.siteName}: ${work.step}" + if (work.number > 0) " (${work.number} of ${work.total})…" else "…"
         ShoppingWork.Idle -> ""
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
         Spacer(Modifier.width(10.dp))
         Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        if (work is ShoppingWork.Searching || work == ShoppingWork.Matching) {
+        if (work is ShoppingWork.Searching || work == ShoppingWork.Matching || work is ShoppingWork.Carting) {
             TextButton(onClick = onStop) { Text("Stop") }
         }
     }
 }
 
 @Composable
-private fun ResultCard(entry: ChatEntry.ResultCard, siteName: (String) -> String, onOpenOffer: (String, String) -> Unit) {
+private fun ResultCard(
+    entry: ChatEntry.ResultCard,
+    siteName: (String) -> String,
+    onOpenOffer: (String, String) -> Unit,
+    onCheckTotals: (() -> Unit)?
+) {
     val result = entry.result
     ChatCard {
         Text("Prices for your list", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
-        Hint("Item prices only. Delivery, handling and other charges come from each site's cart in the next step.")
+        Hint("Item prices only. Delivery, handling and other charges show up in each site's cart.")
         Spacer(Modifier.height(8.dp))
         Summary(result, siteName)
+        if (onCheckTotals != null && result.sites.any { it.found.isNotEmpty() }) {
+            Spacer(Modifier.height(8.dp))
+            Button(onClick = onCheckTotals) { Text("Check real totals with charges") }
+            Hint("Adds the items to each site's cart, after you confirm, and reads the bill. Nothing is ordered.")
+        }
         if (entry.needLogin.isNotEmpty()) {
             Spacer(Modifier.height(6.dp))
             Hint("${entry.needLogin.joinToString()} asked you to log in, so it was left out. Log in in its pane and search again.")

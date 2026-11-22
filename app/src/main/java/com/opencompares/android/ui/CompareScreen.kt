@@ -364,6 +364,13 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
                         viewModel.openOffer(key, url)
                         showChat = false
                     },
+                    onFillCarts = { result, keys -> viewModel.fillCarts(store, result, keys) },
+                    onOpenCart = { key ->
+                        viewModel.openCart(key)
+                        showChat = false
+                    },
+                    onEmptyAdded = { cart -> viewModel.emptyAdded(store, cart) },
+                    cartCount = { key -> viewModel.siteStatus[key]?.cartCount },
                     modifier = Modifier.fillMaxSize(),
                     sitesCard = sitesCard
                 )

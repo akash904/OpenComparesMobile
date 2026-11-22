@@ -8,7 +8,9 @@ data class Provider(
     val urlTemplate: String,
     val overrideUserAgent: String? = null,
     val homeUrl: String? = null,
-    val defaultZoom: Int = 50
+    val defaultZoom: Int = 50,
+    /** The site's cart page, where its bill is shown; null when not known. */
+    val cartUrl: String? = null
 ) {
     fun buildUrl(query: String): String {
         val enc = URLEncoder.encode(query, Charsets.UTF_8.name())
@@ -90,6 +92,7 @@ val MVP_PROVIDERS = listOf(
         displayName = "Instamart",
         urlTemplate = "https://www.swiggy.com/instamart/search?custom_back=true&query={QUERY}",
         homeUrl = "https://www.swiggy.com/instamart",
+        cartUrl = "https://www.swiggy.com/instamart/cart",
         overrideUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
         defaultZoom = 100
     ),
@@ -98,14 +101,16 @@ val MVP_PROVIDERS = listOf(
         displayName = "Blinkit",
         urlTemplate = "https://blinkit.com/s/?q={QUERY}",
         homeUrl = "https://blinkit.com/",
-        defaultZoom = 70
+        defaultZoom = 70,
+        cartUrl = "https://blinkit.com/cart"
     ),
     Provider(
         key = "zepto",
         displayName = "Zepto",
         urlTemplate = "https://www.zeptonow.com/search?query={QUERY}",
         homeUrl = "https://www.zeptonow.com/",
-        defaultZoom = 65
+        defaultZoom = 65,
+        cartUrl = "https://www.zepto.com/cart"
     ),
     Provider(
         key = "amazon_now",

@@ -7,12 +7,13 @@
  *
  * Returns: JSON string {login: "in"|"out"|"unknown",
  *                       location: "set"|"guessed"|"missing"|"unknown",
- *                       label, lat, lon, loginWall}
+ *                       label, lat, lon, loginWall, cartCount}
+ *   cartCount is how many items are in the site's cart, or null when unknown.
  *   "guessed" means the site picked a default city rather than an address the shopper chose.
  */
 (function () {
   var host = location.hostname;
-  var out = { login: "unknown", location: "unknown", label: null, lat: null, lon: null, loginWall: false };
+  var out = { login: "unknown", location: "unknown", label: null, lat: null, lon: null, loginWall: false, cartCount: null };
 
   function stored(key) {
     try {
@@ -61,6 +62,8 @@
   if (/(^|\.)blinkit\.com$/.test(host)) {
     var auth = stored("auth");
     if (auth) out.login = auth.accessToken ? "in" : "out";
+    var bcart = stored("cart");
+    if (bcart && typeof bcart.count === "number") out.cartCount = bcart.count;
     var coords = (stored("location") || {}).coords;
     if (coords && num(coords.lat) && num(coords.lon)) {
       out.location = coords.isDefault ? "guessed" : "set";
@@ -73,6 +76,12 @@
   } else if (/(^|\.)zepto(now)?\.com$/.test(host)) {
     var user = stored("user");
     if (user && user.state) out.login = user.state.isAuth ? "in" : "out";
+    var zcart = (stored("cart") || {}).state;
+    if (zcart && zcart.cartContent) {
+      out.cartCount = Object.keys(zcart.cartContent).reduce(function (n, k) {
+        return n + ((zcart.cartContent[k] && zcart.cartContent[k].quantity) || 0);
+      }, 0);
+    }
     var pos = (stored("user-position") || {}).state;
     if (pos) {
       var p = pos.userPosition;
