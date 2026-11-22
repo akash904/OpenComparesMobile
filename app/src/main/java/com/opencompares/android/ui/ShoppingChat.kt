@@ -46,12 +46,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.opencompares.android.prices.formatRupees
 import com.opencompares.android.shopping.BasketResult
 import com.opencompares.android.shopping.ChatEntry
+import com.opencompares.android.shopping.ItemChange
 import com.opencompares.android.shopping.ItemOption
+import com.opencompares.android.shopping.ListDiff
 import com.opencompares.android.shopping.ItemPlan
 import com.opencompares.android.shopping.ShoppingSession
 import com.opencompares.android.shopping.ShoppingWork
@@ -102,8 +105,10 @@ fun ShoppingChat(
                         is ChatEntry.FromAssistant -> Bubble(entry.text, fromUser = false, isError = entry.isError)
                         is ChatEntry.ListCard -> ListCard(
                             items = entry.items,
+                            diff = entry.diff,
                             // Only the latest list can be searched; older ones are history.
                             canSearch = entry.id == lastListId && work == ShoppingWork.Idle,
+                            isUpdate = session.hasResults,
                             onFindPrices = onFindPrices
                         )
                         is ChatEntry.ResultCard -> ResultCard(entry, siteName, onOpenOffer)
@@ -166,22 +171,50 @@ private fun ChatCard(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun ListCard(items: List<WantedItem>, canSearch: Boolean, onFindPrices: () -> Unit) {
+private fun ListCard(
+    items: List<WantedItem>,
+    diff: ListDiff?,
+    canSearch: Boolean,
+    isUpdate: Boolean,
+    onFindPrices: () -> Unit
+) {
     ChatCard {
-        Text("Your list", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+        Text(if (diff == null) "Your list" else "Your list, updated", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(4.dp))
         items.forEach { item ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                Text(item.name, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f)) {
+                    Text(item.name, style = MaterialTheme.typography.bodyMedium)
+                    // Say what this message did, so a wrong guess (added vs replaced) is easy to spot.
+                    val change = diff?.changes?.get(item.id)
+                    val label = when (change) {
+                        ItemChange.Added -> "new"
+                        ItemChange.Replaced -> "replaces ${diff.replaced[item.id]?.name}"
+                        ItemChange.Changed -> "changed"
+                        else -> null
+                    }
+                    label?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
+                }
                 if (item.amountText.isNotEmpty()) {
                     Text(item.amountText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
+        diff?.removed?.forEach { gone ->
+            Text(
+                gone.name,
+                style = MaterialTheme.typography.bodyMedium.copy(textDecoration = TextDecoration.LineThrough),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 2.dp)
+            )
+        }
         if (canSearch) {
             Spacer(Modifier.height(8.dp))
-            Button(onClick = onFindPrices) { Text("Find the best prices") }
-            Hint("Searches each site for every item, with your logins and location. You can also change the list by typing.")
+            Button(onClick = onFindPrices) { Text(if (isUpdate) "Update prices" else "Find the best prices") }
+            Hint(
+                if (isUpdate) "Only new or changed items are searched again; the rest reuse recent results."
+                else "Searches each site for every item, with your logins and location. You can also change the list by typing."
+            )
         }
     }
 }
@@ -219,6 +252,10 @@ private fun ResultCard(entry: ChatEntry.ResultCard, siteName: (String) -> String
         if (entry.noResults.isNotEmpty()) {
             Spacer(Modifier.height(6.dp))
             Hint("${entry.noResults.joinToString()} showed no products, so it was left out.")
+        }
+        entry.reusedNote?.let {
+            Spacer(Modifier.height(6.dp))
+            Hint(it)
         }
         entry.warnings.forEach {
             Spacer(Modifier.height(6.dp))

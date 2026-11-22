@@ -12,7 +12,9 @@ data class WantedItem(
     val name: String,
     val search: String,
     val want: String?,
-    val count: Int
+    val count: Int,
+    /** Stays the same while the item is changed or replaced, so the app can tell edits from additions. */
+    val id: Int = 0
 ) {
     /** The total amount wanted, when [want] is a size the app understands. */
     val wantedTotal: Quantity?
@@ -31,6 +33,54 @@ data class WantedItem(
 /** ChatGPT's answer to a shopping message: a short reply and the whole updated list. */
 data class ListUpdate(val reply: String?, val items: List<WantedItem>)
 
+/** How an item differs from the list before the latest message. */
+enum class ItemChange { Same, Added, Replaced, Changed }
+
+/** What a message did to the list: each item's change, what replaced items were, what was removed. */
+data class ListDiff(
+    val changes: Map<Int, ItemChange>,
+    val replaced: Map<Int, WantedItem>,
+    val removed: List<WantedItem>
+) {
+    val isEmpty: Boolean get() = removed.isEmpty() && changes.values.all { it == ItemChange.Same }
+
+    companion object {
+        /**
+         * Keeps ids ChatGPT carried over from [old] (each once) and numbers the rest from
+         * [nextId]. Returns the list with ids, and the next free id.
+         */
+        fun assignIds(old: List<WantedItem>, new: List<WantedItem>, nextId: Int): Pair<List<WantedItem>, Int> {
+            val known = old.map { it.id }.toSet()
+            val used = HashSet<Int>()
+            var next = nextId
+            val withIds = new.map { item ->
+                if (item.id in known && used.add(item.id)) item else item.copy(id = next++).also { used += it.id }
+            }
+            return withIds to next
+        }
+
+        fun between(old: List<WantedItem>, new: List<WantedItem>): ListDiff {
+            val before = old.associateBy { it.id }
+            val changes = HashMap<Int, ItemChange>()
+            val replaced = HashMap<Int, WantedItem>()
+            new.forEach { item ->
+                val was = before[item.id]
+                changes[item.id] = when {
+                    was == null -> ItemChange.Added
+                    was == item -> ItemChange.Same
+                    !was.name.equals(item.name, ignoreCase = true) || !was.search.equals(item.search, ignoreCase = true) -> {
+                        replaced[item.id] = was
+                        ItemChange.Replaced
+                    }
+                    else -> ItemChange.Changed
+                }
+            }
+            val kept = new.map { it.id }.toSet()
+            return ListDiff(changes, replaced, old.filter { it.id !in kept })
+        }
+    }
+}
+
 class ShoppingFormatException(message: String) : Exception(message)
 
 object ShoppingListPrompts {
@@ -39,7 +89,12 @@ object ShoppingListPrompts {
     val INSTRUCTIONS = """
         You help a shopper in India plan one grocery order from quick-commerce apps such as Blinkit, Zepto and Instamart.
         Turn their message into a shopping list. If there is a current list, return the whole updated list:
-        add, remove or change items as they ask, and keep the rest as it is.
+        add, remove or change items as they ask, and keep the rest exactly as it is.
+        Every item on the current list has an id. Keep an item's id whenever the shopper changes it,
+        including when they want something else in its place: "instead", "use", "swap", "change to",
+        "make it", "not X but Y", or naming a similar product they were shown. Give no id (null) only to
+        items that are truly extra, as in "also", "add" or "and". If it is unclear, and the new thing
+        does the same job as an item already on the list, replace that item and say so in reply.
         For each item give:
         - name: what they want, in a few words, with the brand only if they named one
         - search: a short phrase to type into the shopping app's search box
@@ -47,7 +102,7 @@ object ShoppingListPrompts {
         - count: how many of those units, usually 1
         At most $MAX_ITEMS items. Do not invent items they did not ask for.
         Reply with JSON only, without code fences, in exactly this shape:
-        {"reply":"one short friendly sentence","items":[{"name":"Amul Taaza toned milk","search":"amul taaza milk","want":"1 l","count":2}]}
+        {"reply":"one short friendly sentence saying what changed","items":[{"id":1,"name":"Amul Taaza toned milk","search":"amul taaza milk","want":"1 l","count":2},{"id":null,"name":"Bread","search":"bread","want":null,"count":1}]}
         If the message is not about shopping, say so briefly in reply and return the current list unchanged.
     """.trimIndent()
 
@@ -80,12 +135,14 @@ object ShoppingListPrompts {
             val search = o.optString("search").trim().take(80).ifEmpty { name }
             val want = if (o.isNull("want")) null else o.optString("want").trim().ifEmpty { null }?.take(20)
             val count = o.optInt("count", 1).coerceIn(1, 20)
-            items += WantedItem(name, search, want, count)
+            val id = if (o.isNull("id")) 0 else o.optInt("id", 0).coerceAtLeast(0)
+            items += WantedItem(name, search, want, count, id)
         }
         return items.distinctBy { it.search.lowercase() }
     }
 
     private fun WantedItem.toJson(): JSONObject = JSONObject()
+        .put("id", id)
         .put("name", name)
         .put("search", search)
         .put("want", want ?: JSONObject.NULL)

@@ -217,7 +217,13 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
     fun refreshStatus(key: String, store: PaneWebViewStore) {
         val view = store.view(key) ?: return
         viewModelScope.launch {
-            statusReader.read(view)?.let { siteStatus[key] = it }
+            val now = statusReader.read(view) ?: return@launch
+            val before = siteStatus[key]
+            siteStatus[key] = now
+            // New login or address: prices may differ, so don't reuse this site's saved results.
+            if (before != null && (before.login != now.login || before.location != now.location || before.label != now.label)) {
+                shopping.forgetSite(key)
+            }
         }
     }
 

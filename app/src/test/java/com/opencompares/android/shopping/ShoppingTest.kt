@@ -40,6 +40,47 @@ class ShoppingTest {
     }
 
     @Test
+    fun idsTellReplacingFromAdding() {
+        val before = listOf(
+            WantedItem("Potatoes", "potato", "1 kg", 3, id = 1),
+            WantedItem("MTR idli batter", "mtr idli batter", null, 1, id = 2),
+            WantedItem("Papaya", "papaya", null, 1, id = 3)
+        )
+        // "use the MTR mix instead, make potatoes 2 kg, drop the papaya, and add bread"
+        val reply = ShoppingListPrompts.parse(
+            """{"reply":"Done.","items":[
+              {"id":1,"name":"Potatoes","search":"potato","want":"1 kg","count":2},
+              {"id":2,"name":"MTR Rava Idli Mix","search":"mtr rava idli mix","want":null,"count":1},
+              {"id":null,"name":"Bread","search":"bread","want":null,"count":1}
+            ]}"""
+        )
+        val (after, next) = ListDiff.assignIds(before, reply.items, nextId = 4)
+        assertEquals(listOf(1, 2, 4), after.map { it.id })
+        assertEquals(5, next)
+
+        val diff = ListDiff.between(before, after)
+        assertEquals(ItemChange.Changed, diff.changes[1])
+        assertEquals(ItemChange.Replaced, diff.changes[2])
+        assertEquals("MTR idli batter", diff.replaced[2]!!.name)
+        assertEquals(ItemChange.Added, diff.changes[4])
+        assertEquals(listOf("Papaya"), diff.removed.map { it.name })
+        assertFalse(diff.isEmpty)
+    }
+
+    @Test
+    fun madeUpOrRepeatedIdsBecomeNewItems() {
+        val before = listOf(WantedItem("Milk", "milk", "1 l", 1, id = 1))
+        val parsed = listOf(
+            WantedItem("Milk", "milk", "1 l", 1, id = 1),
+            WantedItem("Curd", "curd", null, 1, id = 1), // reused id: must not overwrite milk
+            WantedItem("Eggs", "eggs", null, 1, id = 99) // never existed
+        )
+        val (after, _) = ListDiff.assignIds(before, parsed, nextId = 2)
+        assertEquals(listOf(1, 2, 3), after.map { it.id })
+        assertTrue(ListDiff.between(before, listOf(before[0])).isEmpty)
+    }
+
+    @Test
     fun theCurrentListIsSentBack() {
         val input = ShoppingListPrompts.input("add bread", listOf(WantedItem("Milk", "milk", "1 l", 2)))
         assertTrue(input.contains(""""name":"Milk""""))
