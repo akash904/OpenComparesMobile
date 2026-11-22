@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.opencompares.android.CustomProviderCodec
@@ -16,12 +17,32 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import java.io.IOException
 
-/** The settings the user changes in the Marketplaces dialog. */
+/** A delivery location the shopper typed in, used instead of the phone's location. */
+data class DeliveryPlace(val label: String, val lat: Double, val lon: Double) {
+    fun encode(): String = "$lat|$lon|$label"
+
+    companion object {
+        fun decode(s: String?): DeliveryPlace? {
+            val parts = s?.split('|', limit = 3) ?: return null
+            if (parts.size != 3) return null
+            val lat = parts[0].toDoubleOrNull() ?: return null
+            val lon = parts[1].toDoubleOrNull() ?: return null
+            if (lat !in -90.0..90.0 || lon !in -180.0..180.0) return null
+            return DeliveryPlace(parts[2], lat, lon)
+        }
+    }
+}
+
+/** The settings the user changes in the app. */
 data class AppSettings(
     val selectedProviders: Set<String> = DEFAULT_SELECTED,
     val gridColumns: Int = 2,
     val gridHeightDp: Int = 500,
-    val customProviders: List<Provider> = emptyList()
+    val customProviders: List<Provider> = emptyList(),
+    /** Null means the phone's own location. */
+    val deliveryPlace: DeliveryPlace? = null,
+    /** Sites the shopper chose to leave out of shopping searches, e.g. to avoid logging in. */
+    val skippedSites: Set<String> = emptySet()
 ) {
     companion object {
         val DEFAULT_SELECTED = setOf("blinkit", "zepto", "instamart")
@@ -49,6 +70,8 @@ class SettingsRepository(context: Context) {
         val GRID_COLUMNS = intPreferencesKey("gridColumns")
         val GRID_HEIGHT = intPreferencesKey("gridHeight")
         val CUSTOM_PROVIDERS = stringSetPreferencesKey("customProviders")
+        val DELIVERY_PLACE = stringPreferencesKey("deliveryPlace")
+        val SKIPPED_SITES = stringSetPreferencesKey("skippedSites")
     }
 
     val settings: Flow<AppSettings> = dataStore.data
@@ -59,7 +82,9 @@ class SettingsRepository(context: Context) {
                 gridColumns = (prefs[Keys.GRID_COLUMNS] ?: 2).coerceIn(1, 2),
                 gridHeightDp = (prefs[Keys.GRID_HEIGHT] ?: 500)
                     .coerceIn(AppSettings.MIN_GRID_HEIGHT, AppSettings.MAX_GRID_HEIGHT),
-                customProviders = CustomProviderCodec.decodeAll(prefs[Keys.CUSTOM_PROVIDERS] ?: emptySet())
+                customProviders = CustomProviderCodec.decodeAll(prefs[Keys.CUSTOM_PROVIDERS] ?: emptySet()),
+                deliveryPlace = DeliveryPlace.decode(prefs[Keys.DELIVERY_PLACE]),
+                skippedSites = prefs[Keys.SKIPPED_SITES] ?: emptySet()
             )
         }
 
@@ -69,6 +94,9 @@ class SettingsRepository(context: Context) {
             prefs[Keys.GRID_COLUMNS] = settings.gridColumns
             prefs[Keys.GRID_HEIGHT] = settings.gridHeightDp
             prefs[Keys.CUSTOM_PROVIDERS] = settings.customProviders.map(CustomProviderCodec::encode).toSet()
+            val place = settings.deliveryPlace
+            if (place != null) prefs[Keys.DELIVERY_PLACE] = place.encode() else prefs.remove(Keys.DELIVERY_PLACE)
+            prefs[Keys.SKIPPED_SITES] = settings.skippedSites
         }
     }
 }

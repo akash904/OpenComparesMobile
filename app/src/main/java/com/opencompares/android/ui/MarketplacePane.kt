@@ -34,6 +34,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -82,6 +83,12 @@ fun MarketplacePane(
                 viewModel.onMainFrameError(key, url, errorCode)
             override fun onRenderProcessGone() = viewModel.onRenderProcessGone(key)
         }
+    }
+
+    // Each finished load may change the login or address; sites fill these in a moment later.
+    LaunchedEffect(key, pane.loads, pane.instanceId) {
+        kotlinx.coroutines.delay(2_500)
+        viewModel.refreshStatus(key, store)
     }
 
     Card(

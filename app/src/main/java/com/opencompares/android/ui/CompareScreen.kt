@@ -115,8 +115,10 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
     DisposableEffect(lifecycleOwner, store) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> store.onResume()
-                Lifecycle.Event.ON_PAUSE -> store.onPause()
+                // Start/stop, not resume/pause: a dialog or overlay pauses the activity while
+                // it is still on screen, and the sites must keep running then.
+                Lifecycle.Event.ON_START -> store.onResume()
+                Lifecycle.Event.ON_STOP -> store.onPause()
                 else -> Unit
             }
         }
@@ -165,6 +167,22 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
     var showPrices by rememberSaveable { mutableStateOf(false) }
     // The app opens on the shopping chat; the sites are one tap away underneath it.
     var showChat by rememberSaveable { mutableStateOf(true) }
+    // A site opened full screen to log in and set the address, with a checklist under it.
+    var setupSite by rememberSaveable { mutableStateOf<String?>(null) }
+    val endSetup = {
+        setupSite = null
+        viewModel.exitFullscreen()
+        showChat = true
+    }
+    setupSite?.let { key ->
+        // Logins and address pickers often finish without a page load, so keep checking.
+        LaunchedEffect(key) {
+            while (true) {
+                viewModel.refreshStatus(key, store)
+                kotlinx.coroutines.delay(2_000)
+            }
+        }
+    }
     val chatGptViewModel: ChatGptViewModel = viewModel()
     val chatGptState by chatGptViewModel.state.collectAsStateWithLifecycle()
     val runSearch: () -> Unit = {
@@ -274,7 +292,8 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
                         viewModel = viewModel,
                         scrollChain = null,
                         modifier = Modifier
-                            .fillMaxSize()
+                            .weight(1f)
+                            .fillMaxWidth()
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     )
 
@@ -291,10 +310,41 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
                         onRequestLocation = requestLocation
                     )
                 }
+                setupSite?.let { key ->
+                    SetupBanner(
+                        siteName = viewModel.providers.firstOrNull { it.key == key }?.displayName ?: key,
+                        status = viewModel.siteStatus[key],
+                        warning = viewModel.siteWarning(key),
+                        deliveryText = viewModel.deliveryPlace?.label ?: viewModel.addressText,
+                        onDone = endSetup
+                    )
+                }
             }
 
             // Drawn over the panes, which stay laid out so a shopping run can search in them.
             if (showChat) {
+                val sitesCard: @Composable () -> Unit = {
+                    SitesCard(
+                        rows = viewModel.visibleProviders.map { p ->
+                            SiteRow(p.key, p.displayName, viewModel.siteStatus[p.key], viewModel.siteWarning(p.key), p.key in viewModel.skippedSites)
+                        },
+                        deliveryText = viewModel.deliveryPlace?.label ?: viewModel.addressText,
+                        usingTypedPlace = viewModel.deliveryPlace != null,
+                        placeLookup = viewModel.placeLookup,
+                        onUsePhoneLocation = {
+                            viewModel.usePhoneLocation()
+                            requestLocation()
+                        },
+                        onUseTypedPlace = viewModel::useTypedPlace,
+                        onSetUp = { key ->
+                            setupSite = key
+                            showChat = false
+                            viewModel.openFullscreen(key)
+                        },
+                        onSkip = viewModel::setSkipped,
+                        onCheckAgain = { viewModel.refreshStatuses(store) }
+                    )
+                }
                 ShoppingChat(
                     session = viewModel.shopping,
                     signedIn = (chatGptState as? AccountState.SignedIn)?.hasPlanUsage == true,
@@ -305,7 +355,8 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
                         viewModel.openOffer(key, url)
                         showChat = false
                     },
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier.fillMaxSize(),
+                    sitesCard = sitesCard
                 )
             }
         }

@@ -9,6 +9,7 @@ import android.os.Bundle
 import android.os.Looper
 import androidx.core.content.ContextCompat
 import android.content.pm.PackageManager
+import com.opencompares.android.data.DeliveryPlace
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +22,16 @@ object AppLocation : LocationListener {
 
     private val _lastLocation = MutableStateFlow<Location?>(null)
     val lastLocation: StateFlow<Location?> = _lastLocation
+
+    /** A place the shopper typed in. When set, pages get it instead of the phone's location. */
+    @Volatile var manualPlace: DeliveryPlace? = null
+
+    /** Where the shopper wants delivery: the typed-in place, else the phone's location. */
+    fun deliveryPoint(): Triple<Double, Double, Float>? {
+        manualPlace?.let { return Triple(it.lat, it.lon, 100f) }
+        val loc = _lastLocation.value ?: return null
+        return Triple(loc.latitude, loc.longitude, loc.accuracy)
+    }
 
     fun initialize(context: Context) {
         if (locationManager != null) return

@@ -36,7 +36,9 @@ sealed interface ChatEntry {
         /** Sites that showed a login page instead of results. */
         val needLogin: List<String>,
         /** Sites that showed nothing usable for any item. */
-        val noResults: List<String>
+        val noResults: List<String>,
+        /** Sites whose delivery address may not be the shopper's, in words. */
+        val warnings: List<String> = emptyList()
     ) : ChatEntry
 }
 
@@ -58,6 +60,8 @@ interface PaneDriver {
     /** Finished page loads so far; see PaneState.loads. */
     fun loads(key: String): Int
     fun view(key: String): WebView?
+    /** Why this site's prices may not suit the shopper, such as another delivery address. */
+    fun warning(key: String): String?
 }
 
 /**
@@ -140,9 +144,11 @@ class ShoppingSession(
                     if (debugLog) Log.d(TAG, "match reply: $reply")
                     MatchParser.parse(reply, prompt)
                 }
-                val result = BasketResult.from(searches, matches, sites.filter { it !in needLogin && it !in noResults })
+                val used = sites.filter { it !in needLogin && it !in noResults }
+                val result = BasketResult.from(searches, matches, used)
+                val warnings = used.mapNotNull(driver::warning)
                 add {
-                    ChatEntry.ResultCard(it, result, needLogin.map(driver::siteName), noResults.map(driver::siteName))
+                    ChatEntry.ResultCard(it, result, needLogin.map(driver::siteName), noResults.map(driver::siteName), warnings)
                 }
             } catch (e: CancellationException) {
                 add { ChatEntry.FromAssistant(it, "Stopped.") }

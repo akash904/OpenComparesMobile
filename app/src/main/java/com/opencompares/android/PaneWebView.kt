@@ -17,6 +17,8 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
@@ -68,7 +70,6 @@ class PaneWebView(context: Context) : ScrollChainingWebView(context) {
  */
 class PaneWebViewStore {
     private val views = mutableMapOf<String, PaneWebView>()
-    private var timersPaused = false
 
     /** Returns this pane's view, creating it if needed, detached and ready to attach. */
     fun obtain(key: String, context: Context, create: (Context) -> PaneWebView): PaneWebView {
@@ -90,16 +91,19 @@ class PaneWebViewStore {
         views.remove(key)
     }
 
+    /** The app went out of sight. */
     fun onPause() {
         views.values.forEach { it.onPause() }
         // Pauses JavaScript timers for every WebView in the app, saving battery in the background.
         views.values.firstOrNull()?.pauseTimers()
-        timersPaused = true
     }
 
+    /**
+     * The app is visible again. Timers are always resumed, even without a matching pause:
+     * paused timers freeze every site, which then never finishes loading or opening popups.
+     */
     fun onResume() {
-        if (timersPaused) views.values.firstOrNull()?.resumeTimers()
-        timersPaused = false
+        views.values.firstOrNull()?.resumeTimers()
         views.values.forEach { it.onResume() }
     }
 
@@ -169,7 +173,7 @@ private fun applyPaneState(wv: PaneWebView, provider: Provider, pane: PaneState)
     }
 
     if (wv.appliedZoom != pane.zoom) {
-        wv.evaluateJavascript(pageSetupScript(cssViewportWidth(wv, pane.zoom), autoSelectZeptoLocation = false), null)
+        wv.evaluateJavascript(pageSetupScript(cssViewportWidth(wv, pane.zoom)), null)
         wv.appliedZoom = pane.zoom
     }
 
@@ -193,6 +197,10 @@ private fun createPaneWebView(
     pane: PaneState,
     store: PaneWebViewStore
 ): PaneWebView = PaneWebView(ctx).apply {
+    // AndroidView would otherwise use WRAP_CONTENT, and a wrap-content WebView tells pages
+    // the screen is 0 px tall: CSS 100vh becomes 0 and full-height sheets such as
+    // location pickers and login popups open empty.
+    layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
     settings.javaScriptEnabled = true
     settings.domStorageEnabled = true
     settings.setSupportZoom(true)
@@ -253,7 +261,7 @@ private fun createPaneWebView(
             super.onPageFinished(view, url)
             if (isDestroyed) return
             // Widen the CSS viewport so the page renders at the pane's zoom.
-            evaluateJavascript(pageSetupScript(cssViewportWidth(this@apply, targetZoom), autoSelectZeptoLocation = true), null)
+            evaluateJavascript(pageSetupScript(cssViewportWidth(this@apply, targetZoom)), null)
             appliedZoom = targetZoom
             if (url != null) events?.onPageFinished(url, canGoBack())
         }
@@ -302,6 +310,11 @@ private fun createPaneWebView(
     // Keep the initial scale at 100; zoom works by widening the CSS viewport instead.
     setInitialScale(100)
     addJavascriptInterface(LocationBridge(), LocationBridge.NAME)
+    // Before any page script runs, so sites that ask for location while loading get it.
+    // Older WebViews fall back to installing it when a page finishes loading.
+    if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+        WebViewCompat.addDocumentStartJavaScript(this, GEO_SHIM, setOf("*"))
+    }
 
     // New panes start where the pane last was, e.g. after a crash recovery.
     appliedNavId = pane.navId
@@ -312,12 +325,15 @@ private fun createPaneWebView(
     loadUrl(pane.currentUrl)
 }
 
-/** Exposes the app's last known location to pages as window.androidGeo. */
+/**
+ * Exposes the shopper's delivery location to pages as window.androidGeo: the place they
+ * typed in, or else the phone's location. Every site gets the same one.
+ */
 class LocationBridge {
     @JavascriptInterface
     fun getLastLocation(): String {
-        val loc = AppLocation.lastLocation.value ?: return "null"
-        return "{\"lat\":${loc.latitude},\"lon\":${loc.longitude},\"acc\":${loc.accuracy}}"
+        val (lat, lon, acc) = AppLocation.deliveryPoint() ?: return "null"
+        return "{\"lat\":$lat,\"lon\":$lon,\"acc\":$acc}"
     }
 
     companion object {
@@ -334,65 +350,50 @@ private fun cssViewportWidth(wv: WebView, zoomPercent: Int): Int {
 }
 
 /**
- * Sets the viewport width and installs a geolocation shim backed by [LocationBridge].
- * With [autoSelectZeptoLocation], Zepto pages also get their location picker clicked through.
+ * Makes navigator.geolocation answer with the shopper's delivery location from
+ * [LocationBridge], so every site's "use my location" gets the same place. With no
+ * location available, sites get an error and offer to type an address instead.
  */
-private fun pageSetupScript(cssWidth: Int, autoSelectZeptoLocation: Boolean): String {
-    val zepto = if (!autoSelectZeptoLocation) "" else """
-      // Auto-simulate location selection flow (only for Zepto)
-      if (window.location.hostname.includes('zeptonow.com')) {
-        setTimeout(() => {
-          const selectLocationBtn = document.querySelector('button[aria-label*="location"], [data-testid*="location"], button[title*="location"]') ||
-                                 Array.from(document.querySelectorAll('button')).find(btn => btn.textContent.includes('Select Location') || btn.textContent.includes('Location'));
-          if (selectLocationBtn) {
-            selectLocationBtn.click();
-            // Wait for the dialog to appear, then click the location enable button.
-            setTimeout(() => {
-              const enableLocationBtn = document.querySelector('button[aria-label*="enable"], [data-testid*="enable"], [data-testid*="allow"]') ||
-                                     Array.from(document.querySelectorAll('button')).find(btn =>
-                                         btn.textContent.includes('Enable') ||
-                                         btn.textContent.includes('Allow') ||
-                                         btn.textContent.includes('Yes') ||
-                                         btn.textContent.includes('Continue')
-                                     );
-              if (enableLocationBtn) enableLocationBtn.click();
-            }, 2000);
-          }
-        }, 3000);
-      }
-    """
-    return """
+private val GEO_SHIM = """
+    (function () {
+      try {
+        if (window.__ocGeoInstalled || !window.${LocationBridge.NAME} || !navigator.geolocation) return;
+        var read = function () {
+          try { return JSON.parse(window.${LocationBridge.NAME}.getLastLocation()); } catch (e) { return null; }
+        };
+        var position = function (l) {
+          return {
+            coords: { latitude: l.lat, longitude: l.lon, accuracy: l.acc || 50, altitude: null,
+                      altitudeAccuracy: null, heading: null, speed: null },
+            timestamp: Date.now()
+          };
+        };
+        // Answer asynchronously, as the real API does. A microtask, not a timer, so the
+        // answer arrives even if the app has paused JavaScript timers.
+        var answer = function (success, error) {
+          Promise.resolve().then(function () {
+            var l = read();
+            if (l) { if (typeof success === "function") success(position(l)); }
+            else if (typeof error === "function") {
+              error({ code: 2, message: "Location unavailable", PERMISSION_DENIED: 1, POSITION_UNAVAILABLE: 2, TIMEOUT: 3 });
+            }
+          });
+        };
+        var nextId = 1;
+        var geo = navigator.geolocation;
+        geo.getCurrentPosition = function (success, error) { answer(success, error); };
+        geo.watchPosition = function (success, error) { answer(success, error); return nextId++; };
+        geo.clearWatch = function () {};
+        window.__ocGeoInstalled = true;
+      } catch (e) {}
+    })();
+""".trimIndent()
+
+/** Sets the viewport width for the pane's zoom, and installs [GEO_SHIM] if it isn't yet. */
+private fun pageSetupScript(cssWidth: Int): String = """
     (function(){
       var m=document.querySelector('meta[name=\x76\x69\x65\x77\x70\x6f\x72\x74]');
       if(!m){m=document.createElement('meta');m.setAttribute('name','viewport');document.head.appendChild(m);}
       m.setAttribute('content','width=' + $cssWidth + ', initial-scale=1.0');
-      $zepto
-      try {
-        if (!window.__ocGeoInstalled && window.${LocationBridge.NAME}) {
-          window.__ocGeoInstalled = true;
-          const parse = (s) => { try { return JSON.parse(s); } catch(e){ return null } };
-          const makePosition = (loc) => ({
-            coords: { latitude: loc.lat, longitude: loc.lon, accuracy: loc.acc || 50, altitude: null, altitudeAccuracy: null, heading: null, speed: null },
-            timestamp: Date.now()
-          });
-          const getLoc = () => parse(window.${LocationBridge.NAME}.getLastLocation());
-          const geo = {
-            getCurrentPosition: function(success, error){
-              const l = getLoc();
-              if (l && typeof success === 'function') success(makePosition(l));
-              else if (typeof error === 'function') error({ code: 1, message: 'Location unavailable' });
-            },
-            watchPosition: function(success){
-              const id = Math.floor(Math.random()*1e9);
-              window.__ocWatchers = window.__ocWatchers || {};
-              window.__ocWatchers[id] = success;
-              return id;
-            },
-            clearWatch: function(id){ if (window.__ocWatchers) delete window.__ocWatchers[id]; }
-          };
-          if (!navigator.geolocation) navigator.geolocation = geo; else { try { Object.setPrototypeOf(navigator.geolocation, geo); } catch(e) { navigator.geolocation = geo; } }
-        }
-      } catch(e) {}
     })();
-    """.trimIndent()
-}
+""".trimIndent() + "\n" + GEO_SHIM

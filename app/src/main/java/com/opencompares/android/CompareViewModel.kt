@@ -16,6 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.opencompares.android.data.AppSettings
+import com.opencompares.android.data.DeliveryPlace
 import com.opencompares.android.data.SettingsRepository
 import com.opencompares.android.chatgpt.ChatGptAccount
 import com.opencompares.android.chatgpt.SiwcApiException
@@ -27,6 +28,11 @@ import com.opencompares.android.prices.PaneReadResult
 import com.opencompares.android.prices.PriceReader
 import com.opencompares.android.shopping.PaneDriver
 import com.opencompares.android.shopping.ShoppingSession
+import com.opencompares.android.sites.FAR_AWAY_KM
+import com.opencompares.android.sites.LocationState
+import com.opencompares.android.sites.LoginState
+import com.opencompares.android.sites.SiteStatus
+import com.opencompares.android.sites.SiteStatusReader
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -107,6 +113,13 @@ data class PaneState(
     }
 }
 
+/** Looking up a place the shopper typed in. */
+sealed interface PlaceLookup {
+    data object Idle : PlaceLookup
+    data object Searching : PlaceLookup
+    data class Failed(val message: String) : PlaceLookup
+}
+
 /** Progress of a ChatGPT comparison of the prices read from the panes. */
 sealed interface ComparisonState {
     data object Idle : ComparisonState
@@ -174,14 +187,129 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
         debugLog = application.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
     )
 
+    // Site setup: login and delivery location on each marketplace
+
+    private val statusReader = SiteStatusReader(application)
+
+    /** What each pane last said about login and delivery location. */
+    val siteStatus = mutableStateMapOf<String, SiteStatus>()
+
+    /** The phone's own location, as latitude and longitude. */
+    var phonePoint by mutableStateOf<Pair<Double, Double>?>(null)
+        private set
+
+    var placeLookup by mutableStateOf<PlaceLookup>(PlaceLookup.Idle)
+        private set
+
+    /** A typed-in delivery place, or null for the phone's location. */
+    val deliveryPlace: DeliveryPlace? get() = settings?.deliveryPlace
+
+    /** Where the shopper wants delivery: the typed-in place, else the phone's location. */
+    val deliveryPoint: Pair<Double, Double>?
+        get() = deliveryPlace?.let { it.lat to it.lon } ?: phonePoint
+
+    val skippedSites: Set<String> get() = settings?.skippedSites ?: emptySet()
+
+    fun refreshStatus(key: String, store: PaneWebViewStore) {
+        val view = store.view(key) ?: return
+        viewModelScope.launch {
+            statusReader.read(view)?.let { siteStatus[key] = it }
+        }
+    }
+
+    fun refreshStatuses(store: PaneWebViewStore) = visibleProviders.forEach { refreshStatus(it.key, store) }
+
+    fun setSkipped(key: String, skipped: Boolean) {
+        val current = settings ?: return
+        val updated = if (skipped) current.skippedSites + key else current.skippedSites - key
+        saveSettings(current.copy(skippedSites = updated))
+    }
+
+    fun usePhoneLocation() {
+        val current = settings ?: return
+        placeLookup = PlaceLookup.Idle
+        saveSettings(current.copy(deliveryPlace = null))
+    }
+
+    /** Finds a typed area or pincode and uses it as the delivery location for every site. */
+    fun useTypedPlace(query: String) {
+        val q = query.trim()
+        if (q.isEmpty() || placeLookup == PlaceLookup.Searching) return
+        placeLookup = PlaceLookup.Searching
+        viewModelScope.launch {
+            val place = findPlace(q)
+            val current = settings
+            if (place == null || current == null) {
+                placeLookup = PlaceLookup.Failed("Couldn't find \"$q\". Try an area and city, or a pincode.")
+            } else {
+                placeLookup = PlaceLookup.Idle
+                saveSettings(current.copy(deliveryPlace = place))
+            }
+        }
+    }
+
+    /**
+     * Why a site's prices may not suit the shopper, or null when all looks right.
+     * Login walls are reported by the shopping run itself.
+     */
+    fun siteWarning(key: String): String? {
+        val status = siteStatus[key] ?: return null
+        val name = providers.firstOrNull { it.key == key }?.displayName ?: key
+        val point = deliveryPoint
+        val far = point?.let { status.distanceKmFrom(it.first, it.second) }?.takeIf { it > FAR_AWAY_KM }
+        return when {
+            status.location == LocationState.Missing -> "$name has no delivery address set, so its prices may be for another area."
+            status.location == LocationState.Guessed ->
+                "$name is guessing your area" + (status.label?.let { " ($it)" } ?: "") + ", so its prices may not be for your address."
+            far != null -> "$name is delivering to ${status.label ?: "another address"}, ${Math.round(far)} km from your location."
+            else -> null
+        }
+    }
+
+    /** True when the site is logged in with a delivery address near the shopper. */
+    fun siteReady(key: String): Boolean {
+        val status = siteStatus[key] ?: return false
+        return status.login == LoginState.In && status.location == LocationState.Set && siteWarning(key) == null
+    }
+
+    private suspend fun findPlace(query: String): DeliveryPlace? {
+        if (!Geocoder.isPresent()) return null
+        val geocoder = Geocoder(getApplication(), Locale.getDefault())
+        // The marketplaces are Indian, so look there first.
+        val q = if (query.contains("india", ignoreCase = true)) query else "$query, India"
+        val address: Address? = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                suspendCancellableCoroutine { cont ->
+                    geocoder.getFromLocationName(q, 1, object : Geocoder.GeocodeListener {
+                        override fun onGeocode(results: MutableList<Address>) = cont.resume(results.firstOrNull())
+                        override fun onError(errorMessage: String?) = cont.resume(null)
+                    })
+                }
+            } else {
+                withContext(Dispatchers.IO) {
+                    @Suppress("DEPRECATION")
+                    geocoder.getFromLocationName(q, 1)?.firstOrNull()
+                }
+            }
+        } catch (_: Exception) {
+            null
+        }
+        return address?.let {
+            val label = listOfNotNull(it.subLocality, it.locality, it.postalCode).distinct().joinToString(", ").ifEmpty { query }
+            DeliveryPlace(label, it.latitude, it.longitude)
+        }
+    }
+
     /** Searches every visible pane for each item on the shopping list. */
     fun findBestPrices(store: PaneWebViewStore) {
         // Every pane must be on screen (under the chat) to load and render its results.
         fullScreenPane = null
         shopping.findBestPrices(object : PaneDriver {
             override val siteKeys = visibleProviders
-                .filter { pane(it).error?.kind != PaneError.Kind.Crashed }
+                .filter { pane(it).error?.kind != PaneError.Kind.Crashed && it.key !in skippedSites }
                 .map { it.key }
+
+            override fun warning(key: String) = siteWarning(key)
 
             override fun siteName(key: String) = providers.firstOrNull { it.key == key }?.displayName ?: key
 
@@ -267,12 +395,14 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             repository.settings.collect { loaded ->
                 settings = loaded
+                AppLocation.manualPlace = loaded.deliveryPlace
                 if (fullScreenPane != null && fullScreenPane !in loaded.selectedProviders) fullScreenPane = null
             }
         }
         viewModelScope.launch {
             var lastGeocoded: Location? = null
             AppLocation.lastLocation.collect { loc ->
+                phonePoint = loc?.let { it.latitude to it.longitude }
                 if (loc == null) {
                     addressText = null
                     return@collect
@@ -336,6 +466,7 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
 
     fun saveSettings(newSettings: AppSettings) {
         settings = newSettings
+        AppLocation.manualPlace = newSettings.deliveryPlace
         if (fullScreenPane != null && fullScreenPane !in newSettings.selectedProviders) fullScreenPane = null
         viewModelScope.launch { repository.save(newSettings) }
     }

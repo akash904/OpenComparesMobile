@@ -137,8 +137,9 @@ fun MarketplaceSettingsDialog(
         confirmButton = {
             TextButton(onClick = {
                 val keys = (MVP_PROVIDERS + customProviders).map { it.key }.toSet()
+                // copy() keeps settings this dialog doesn't show, like the delivery location.
                 onSave(
-                    AppSettings(
+                    current.copy(
                         selectedProviders = selected intersect keys,
                         gridColumns = columns,
                         gridHeightDp = height,

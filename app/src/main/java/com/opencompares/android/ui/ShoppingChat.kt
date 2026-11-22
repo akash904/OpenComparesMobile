@@ -69,7 +69,9 @@ fun ShoppingChat(
     onSignIn: () -> Unit,
     onFindPrices: () -> Unit,
     onOpenOffer: (providerKey: String, url: String) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    /** Shown under the greeting: the shopper's sites and delivery location. */
+    sitesCard: @Composable () -> Unit = {}
 ) {
     val listState = rememberLazyListState()
     val work = session.work
@@ -89,7 +91,12 @@ fun ShoppingChat(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(session.entries, key = { it.id }) { entry ->
+                // The greeting, then the sites card, then the conversation.
+                items(session.entries.take(1), key = { it.id }) { entry ->
+                    if (entry is ChatEntry.FromAssistant) Bubble(entry.text, fromUser = false)
+                }
+                item(key = "sites") { sitesCard() }
+                items(session.entries.drop(1), key = { it.id }) { entry ->
                     when (entry) {
                         is ChatEntry.FromUser -> Bubble(entry.text, fromUser = true)
                         is ChatEntry.FromAssistant -> Bubble(entry.text, fromUser = false, isError = entry.isError)
@@ -212,6 +219,10 @@ private fun ResultCard(entry: ChatEntry.ResultCard, siteName: (String) -> String
         if (entry.noResults.isNotEmpty()) {
             Spacer(Modifier.height(6.dp))
             Hint("${entry.noResults.joinToString()} showed no products, so it was left out.")
+        }
+        entry.warnings.forEach {
+            Spacer(Modifier.height(6.dp))
+            Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
         result.items.forEach { plan ->
             Spacer(Modifier.height(10.dp))
