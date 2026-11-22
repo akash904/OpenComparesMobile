@@ -326,7 +326,14 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
                 val sitesCard: @Composable () -> Unit = {
                     SitesCard(
                         rows = viewModel.visibleProviders.map { p ->
-                            SiteRow(p.key, p.displayName, viewModel.siteStatus[p.key], viewModel.siteWarning(p.key), p.key in viewModel.skippedSites)
+                            SiteRow(
+                                key = p.key,
+                                name = p.displayName,
+                                status = viewModel.siteStatus[p.key],
+                                warning = viewModel.siteWarning(p.key),
+                                loginSkipped = p.key in viewModel.skippedLogin,
+                                locationSkipped = p.key in viewModel.skippedLocation
+                            )
                         },
                         deliveryText = viewModel.deliveryPlace?.label ?: viewModel.addressText,
                         usingTypedPlace = viewModel.deliveryPlace != null,
@@ -341,7 +348,9 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
                             showChat = false
                             viewModel.openFullscreen(key)
                         },
-                        onSkip = viewModel::setSkipped,
+                        onSkipLogin = viewModel::skipLogin,
+                        onSkipLocation = viewModel::skipLocation,
+                        onManagePlatforms = { showSettings = true },
                         onCheckAgain = { viewModel.refreshStatuses(store) }
                     )
                 }

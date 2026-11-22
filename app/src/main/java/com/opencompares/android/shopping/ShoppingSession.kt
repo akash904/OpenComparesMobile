@@ -165,11 +165,20 @@ class ShoppingSession(
         job?.cancel()
     }
 
+    /** Searches one site, trying once more if it shows a login page instead of results. */
+    private suspend fun searchSite(driver: PaneDriver, key: String, query: String): PageOffers? {
+        val first = searchOnce(driver, key, query)
+        if (first?.needsLogin != true) return first
+        // Instamart, for one, shows its login wall for some searches and not for the next.
+        delay(LOGIN_RETRY_DELAY_MS)
+        return searchOnce(driver, key, query) ?: first
+    }
+
     /**
      * Searches one site in its pane and waits for the results to settle: the page must
      * finish loading, then two reads in a row must agree, since sites fill in results late.
      */
-    private suspend fun searchSite(driver: PaneDriver, key: String, query: String): PageOffers? {
+    private suspend fun searchOnce(driver: PaneDriver, key: String, query: String): PageOffers? {
         val url = driver.searchUrl(key, query) ?: return null
         val loadsBefore = driver.loads(key)
         driver.navigate(key, url)
@@ -213,5 +222,6 @@ class ShoppingSession(
         private const val PAGE_LOAD_TIMEOUT_MS = 15_000L
         private const val READ_INTERVAL_MS = 1_500L
         private const val MAX_READS = 8
+        private const val LOGIN_RETRY_DELAY_MS = 2_500L
     }
 }

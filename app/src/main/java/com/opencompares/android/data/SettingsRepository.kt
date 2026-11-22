@@ -41,8 +41,10 @@ data class AppSettings(
     val customProviders: List<Provider> = emptyList(),
     /** Null means the phone's own location. */
     val deliveryPlace: DeliveryPlace? = null,
-    /** Sites the shopper chose to leave out of shopping searches, e.g. to avoid logging in. */
-    val skippedSites: Set<String> = emptySet()
+    /** Sites the shopper chose to use without logging in. */
+    val skippedLogin: Set<String> = emptySet(),
+    /** Sites the shopper chose to use with the site's own idea of their area. */
+    val skippedLocation: Set<String> = emptySet()
 ) {
     companion object {
         val DEFAULT_SELECTED = setOf("blinkit", "zepto", "instamart")
@@ -71,7 +73,8 @@ class SettingsRepository(context: Context) {
         val GRID_HEIGHT = intPreferencesKey("gridHeight")
         val CUSTOM_PROVIDERS = stringSetPreferencesKey("customProviders")
         val DELIVERY_PLACE = stringPreferencesKey("deliveryPlace")
-        val SKIPPED_SITES = stringSetPreferencesKey("skippedSites")
+        val SKIPPED_LOGIN = stringSetPreferencesKey("skippedLogin")
+        val SKIPPED_LOCATION = stringSetPreferencesKey("skippedLocation")
     }
 
     val settings: Flow<AppSettings> = dataStore.data
@@ -84,7 +87,8 @@ class SettingsRepository(context: Context) {
                     .coerceIn(AppSettings.MIN_GRID_HEIGHT, AppSettings.MAX_GRID_HEIGHT),
                 customProviders = CustomProviderCodec.decodeAll(prefs[Keys.CUSTOM_PROVIDERS] ?: emptySet()),
                 deliveryPlace = DeliveryPlace.decode(prefs[Keys.DELIVERY_PLACE]),
-                skippedSites = prefs[Keys.SKIPPED_SITES] ?: emptySet()
+                skippedLogin = prefs[Keys.SKIPPED_LOGIN] ?: emptySet(),
+                skippedLocation = prefs[Keys.SKIPPED_LOCATION] ?: emptySet()
             )
         }
 
@@ -96,7 +100,8 @@ class SettingsRepository(context: Context) {
             prefs[Keys.CUSTOM_PROVIDERS] = settings.customProviders.map(CustomProviderCodec::encode).toSet()
             val place = settings.deliveryPlace
             if (place != null) prefs[Keys.DELIVERY_PLACE] = place.encode() else prefs.remove(Keys.DELIVERY_PLACE)
-            prefs[Keys.SKIPPED_SITES] = settings.skippedSites
+            prefs[Keys.SKIPPED_LOGIN] = settings.skippedLogin
+            prefs[Keys.SKIPPED_LOCATION] = settings.skippedLocation
         }
     }
 }

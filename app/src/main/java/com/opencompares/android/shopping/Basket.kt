@@ -28,10 +28,12 @@ object MatchPrompts {
         For each wanted item, pick on each site the one listing that is that item: the same product,
         the same brand if one was named, the same variant (toned or full cream, flavour, and so on).
         Prefer a pack size that fits the amount wanted. If nothing on a site is really that item,
-        leave that site out rather than picking something different.
+        leave that site out of "ids" rather than picking something different.
+        For a site left out, you may put its closest listing in "similar": another brand, variant
+        or form the shopper might accept instead (for example an idli mix when they asked for batter).
         Use only the listing ids given, and only ids listed under that item.
         Reply with JSON only, without code fences, in exactly this shape:
-        {"items":[{"item":1,"ids":["1a3","1b2"],"note":"optional short note, or empty"}]}
+        {"items":[{"item":1,"ids":["1a3","1b2"],"similar":["1c5"],"note":"optional short note, or empty"}]}
     """.trimIndent()
 
     fun build(searches: List<ItemSearch>, siteName: (String) -> String): MatchPrompt {
@@ -67,8 +69,15 @@ object MatchPrompts {
     }
 }
 
-/** For each item index, the chosen listing on each site, plus ChatGPT's note. */
-data class Matches(val picks: Map<Int, Map<String, Candidate>>, val notes: Map<Int, String>)
+/**
+ * For each item index: the listing that is that item on each site, a similar listing on
+ * sites without one, and ChatGPT's note.
+ */
+data class Matches(
+    val picks: Map<Int, Map<String, Candidate>>,
+    val notes: Map<Int, String>,
+    val similar: Map<Int, Map<String, Candidate>> = emptyMap()
+)
 
 object MatchParser {
     /** Ids that don't exist, or belong to a different item, are dropped; one listing per site. */
@@ -76,6 +85,7 @@ object MatchParser {
         val json = extractJson(reply) ?: throw ShoppingFormatException("No JSON object in the reply")
         val items = json.optJSONArray("items") ?: throw ShoppingFormatException("No items list")
         val picks = HashMap<Int, LinkedHashMap<String, Candidate>>()
+        val similar = HashMap<Int, LinkedHashMap<String, Candidate>>()
         val notes = HashMap<Int, String>()
         for (i in 0 until items.length()) {
             val o = items.optJSONObject(i) ?: continue
@@ -88,9 +98,18 @@ object MatchParser {
                 if (c.itemIndex != index || c.providerKey in chosen) continue
                 chosen[c.providerKey] = c
             }
+            // A similar listing only stands in on a site with no exact match.
+            o.optJSONArray("similar")?.let { ids2 ->
+                val alt = similar.getOrPut(index) { LinkedHashMap() }
+                for (j in 0 until ids2.length()) {
+                    val c = prompt.candidates[ids2.optString(j).trim().lowercase(Locale.ROOT)] ?: continue
+                    if (c.itemIndex != index || c.providerKey in chosen || c.providerKey in alt) continue
+                    alt[c.providerKey] = c
+                }
+            }
             o.optString("note").trim().take(200).ifEmpty { null }?.let { notes[index] = it }
         }
-        return Matches(picks, notes)
+        return Matches(picks, notes, similar)
     }
 }
 
@@ -141,7 +160,9 @@ data class ItemPlan(
     val options: List<ItemOption>,
     val note: String?,
     /** Sites that showed a login page instead of results for this item. */
-    val loginNeeded: List<String> = emptyList()
+    val loginNeeded: List<String> = emptyList(),
+    /** Close but not the same, on sites without the item itself. Not counted in totals. */
+    val similar: List<ItemOption> = emptyList()
 ) {
     val cheapest: ItemOption? get() = options.firstOrNull()
 
@@ -162,10 +183,16 @@ data class SiteTotal(val providerKey: String, val found: List<ItemOption>, val m
  */
 class BasketResult(val items: List<ItemPlan>, siteKeys: List<String>) {
 
-    /** Sites with everything first (cheapest first), then the ones with the most items. */
+    /**
+     * Sites with everything first (cheapest first), then the ones with the most items.
+     * Items no site has don't count as missing anywhere, so one of them can't hide the
+     * site that has everything else.
+     */
     val sites: List<SiteTotal> = siteKeys.map { key ->
         val found = items.mapNotNull { plan -> plan.options.firstOrNull { it.providerKey == key } }
-        val missing = items.filter { plan -> plan.options.none { it.providerKey == key } }.map { it.item }
+        val missing = items
+            .filter { plan -> plan.options.isNotEmpty() && plan.options.none { it.providerKey == key } }
+            .map { it.item }
         SiteTotal(key, found, missing)
     }.sortedWith(compareBy<SiteTotal>({ !it.complete }, { it.missing.size }, { it.subtotal }))
 
@@ -192,7 +219,10 @@ class BasketResult(val items: List<ItemPlan>, siteKeys: List<String>) {
                     }
                     .sortedWith(compareBy<ItemOption>({ Math.round(it.cost * 100) }, { -(coverage[it.providerKey] ?: 0) }))
                 val loginNeeded = search.pages.filter { it.needsLogin }.map { it.providerKey }
-                ItemPlan(search.item, options, matches.notes[index], loginNeeded)
+                val similar = matches.similar[index].orEmpty().values
+                    .map { c -> ItemOption(c.providerKey, c.offer, packsFor(search.item, c.offer).first) }
+                    .sortedBy { it.cost }
+                ItemPlan(search.item, options, matches.notes[index], loginNeeded, similar)
             }
             return BasketResult(plans, siteKeys)
         }

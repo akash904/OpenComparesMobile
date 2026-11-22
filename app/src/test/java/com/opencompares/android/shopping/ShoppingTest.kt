@@ -150,12 +150,47 @@ class ShoppingTest {
     }
 
     @Test
+    fun similarListingsOnlyStandInWhereThereIsNoExactMatch() {
+        val batter = WantedItem("MTR idli batter", "mtr idli batter", null, 1)
+        val search = listOf(
+            ItemSearch(
+                batter, listOf(
+                    page("blinkit", offer("MTR Rava Idli Mix", 95.0, "500 g")),
+                    page("zepto", offer("iD Idli Dosa Batter", 80.0, "1 kg"), offer("MTR Rava Idli Mix", 90.0, "500 g"))
+                )
+            )
+        )
+        val p = MatchPrompts.build(search) { it }
+        // Zepto has the exact item; its "similar" must be ignored. Blinkit only has a mix.
+        val m = MatchParser.parse("""{"items":[{"item":1,"ids":["1b1"],"similar":["1a1","1b2"]}]}""", p)
+        val result = BasketResult.from(search, m, listOf("blinkit", "zepto"))
+        val plan = result.items[0]
+        assertEquals(listOf("zepto"), plan.options.map { it.providerKey })
+        assertEquals(listOf("blinkit"), plan.similar.map { it.providerKey })
+        // Similar listings don't count: only Zepto has the item.
+        assertEquals("zepto", result.bestSingleSite!!.providerKey)
+    }
+
+    @Test
     fun loginWallsAreKeptApartFromNotFound() {
         val walled = PageOffers("instamart", "", "", emptyList(), 0, needsLogin = true, readAtMillis = 0)
         val search = listOf(ItemSearch(eggs, listOf(page("blinkit", offer("Eggs", 60.0, "6 pcs")), walled)))
         val p = MatchPrompts.build(search) { it }
         val result = BasketResult.from(search, MatchParser.parse("""{"items":[{"item":1,"ids":["1a1"]}]}""", p), listOf("blinkit", "instamart"))
         assertEquals(listOf("instamart"), result.items[0].loginNeeded)
+    }
+
+    @Test
+    fun anItemNoSiteHasDoesNotHideTheSiteWithEverythingElse() {
+        val batter = WantedItem("MTR idli batter", "mtr idli batter", null, 1)
+        val search = searches + ItemSearch(batter, listOf(page("blinkit", offer("Khetika Batter", 99.0, "1 kg"))))
+        val p = MatchPrompts.build(search) { names.getValue(it) }
+        // Blinkit has milk and eggs; nobody has the batter itself.
+        val m = MatchParser.parse("""{"items":[{"item":1,"ids":["1a1","1b1"]},{"item":2,"ids":["2a1"]},{"item":3,"ids":[],"similar":["3a1"]}]}""", p)
+        val result = BasketResult.from(search, m, listOf("blinkit", "zepto"))
+        assertEquals(listOf("MTR idli batter"), result.unavailable.map { it.name })
+        assertEquals("blinkit", result.bestSingleSite!!.providerKey)
+        assertEquals(122.0, result.bestSingleSite!!.subtotal, 0.0)
     }
 
     @Test

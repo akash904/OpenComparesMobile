@@ -237,8 +237,9 @@ private fun ResultCard(entry: ChatEntry.ResultCard, siteName: (String) -> String
 private fun Summary(result: BasketResult, siteName: (String) -> String) {
     val single = result.bestSingleSite
     if (single != null) {
+        val everything = if (result.unavailable.isEmpty()) "Everything" else "Everything that was found"
         Text(
-            "Everything on ${siteName(single.providerKey)}: ${formatRupees(single.subtotal)}",
+            "$everything on ${siteName(single.providerKey)}: ${formatRupees(single.subtotal)}",
             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
         )
     } else if (result.items.isNotEmpty()) {
@@ -246,10 +247,17 @@ private fun Summary(result: BasketResult, siteName: (String) -> String) {
     }
     result.sites.forEach { site ->
         val total = site.found.size + site.missing.size
-        val coverage = if (site.complete) "all $total items" else "${site.found.size} of $total items"
-        val missing = if (site.missing.isNotEmpty() && site.missing.size <= 3) {
-            " (no ${site.missing.joinToString { it.name }})"
-        } else ""
+        val coverage = when {
+            !site.complete -> "${site.found.size} of $total items"
+            result.unavailable.isEmpty() -> "all $total items"
+            else -> "all $total found items"
+        }
+        val walled = result.items.filter { site.providerKey in it.loginNeeded }.map { it.item }
+        val notThere = site.missing - walled.toSet()
+        val missing = listOfNotNull(
+            notThere.takeIf { it.isNotEmpty() && it.size <= 3 }?.let { "no ${it.joinToString { w -> w.name }}" },
+            walled.takeIf { it.isNotEmpty() }?.let { "asked to log in for ${it.joinToString { w -> w.name }}" }
+        ).joinToString("; ").let { if (it.isEmpty()) "" else " ($it)" }
         Text(
             "${siteName(site.providerKey)}: $coverage, ${formatRupees(site.subtotal)}$missing",
             style = MaterialTheme.typography.bodySmall
@@ -298,6 +306,17 @@ private fun ItemRows(plan: ItemPlan, result: BasketResult, siteName: (String) ->
         Hint("Not found on ${missingOn.joinToString { siteName(it) }}")
     }
     if (plan.options.isEmpty() && plan.loginNeeded.isEmpty()) Hint("Not found on any site.")
+    if (plan.similar.isNotEmpty()) {
+        Text(
+            if (plan.options.isEmpty()) "Similar, not exactly what you asked for:" else "Similar on other sites:",
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+        plan.similar.forEach { option ->
+            OptionRow(option, isCheapest = false, siteName(option.providerKey), onOpenOffer)
+        }
+        Hint("Not counted in the totals. To use one, tell me, like \"use ${plan.similar.first().offer.name.take(30)} instead\".")
+    }
     plan.note?.let { Hint(it) }
 }
 

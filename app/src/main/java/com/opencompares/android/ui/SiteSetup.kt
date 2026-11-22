@@ -18,7 +18,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.HelpOutline
-import androidx.compose.material.icons.filled.RemoveCircleOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -53,12 +52,19 @@ data class SiteRow(
     val status: SiteStatus?,
     /** Why its prices may not suit the shopper, e.g. another delivery address. */
     val warning: String?,
-    val skipped: Boolean
-)
+    /** The shopper chose to use this site without logging in. */
+    val loginSkipped: Boolean,
+    /** The shopper chose to let this site use its own idea of their area. */
+    val locationSkipped: Boolean
+) {
+    val loginDone: Boolean get() = status?.login == LoginState.In
+    val locationDone: Boolean get() = status?.location == LocationState.Set && warning == null
+    val ready: Boolean get() = (loginDone || loginSkipped) && (locationDone || locationSkipped)
+}
 
 /**
  * The shopper's delivery location and each site's login and address, with a way to fix
- * each. Logging in is optional: skipped sites are left out of searches.
+ * or skip each. Skipping keeps the site in searches: as a guest, or with its own area.
  */
 @Composable
 fun SitesCard(
@@ -69,11 +75,13 @@ fun SitesCard(
     onUsePhoneLocation: () -> Unit,
     onUseTypedPlace: (String) -> Unit,
     onSetUp: (String) -> Unit,
-    onSkip: (String, Boolean) -> Unit,
+    onSkipLogin: (String, Boolean) -> Unit,
+    onSkipLocation: (String, Boolean) -> Unit,
+    onManagePlatforms: () -> Unit,
     onCheckAgain: () -> Unit
 ) {
-    val readyCount = rows.count { !it.skipped && it.isReady() }
-    val active = rows.count { !it.skipped }
+    val readyCount = rows.count { it.ready }
+    val active = rows.size
     var expanded by rememberSaveable { mutableStateOf(true) }
     var changingPlace by rememberSaveable { mutableStateOf(false) }
 
@@ -128,11 +136,14 @@ fun SitesCard(
             Spacer(Modifier.height(8.dp))
             HorizontalDivider()
             Spacer(Modifier.height(8.dp))
-            SiteLine(row, onSetUp, onSkip)
+            SiteLine(row, onSetUp, onSkipLogin, onSkipLocation)
         }
         Spacer(Modifier.height(8.dp))
-        Hint("Logging in shows your own prices and offers, and lets the app read real delivery fees later. You can skip any site; it's then left out of searches.")
-        TextButton(onClick = onCheckAgain) { Text("Check again") }
+        Hint("Logging in shows your own prices and offers, and lets the app read real delivery fees later. You can skip logging in or setting the address on any site; it is still searched.")
+        Row {
+            TextButton(onClick = onManagePlatforms) { Text("Manage platforms") }
+            TextButton(onClick = onCheckAgain) { Text("Check again") }
+        }
     }
 }
 
@@ -171,15 +182,16 @@ private fun PlaceEditor(
     }
 }
 
-private fun SiteRow.isReady(): Boolean =
-    status != null && status.login == LoginState.In && status.location == LocationState.Set && warning == null
-
 @Composable
-private fun SiteLine(row: SiteRow, onSetUp: (String) -> Unit, onSkip: (String, Boolean) -> Unit) {
+private fun SiteLine(
+    row: SiteRow,
+    onSetUp: (String) -> Unit,
+    onSkipLogin: (String, Boolean) -> Unit,
+    onSkipLocation: (String, Boolean) -> Unit
+) {
     val s = row.status
     val (icon, tint) = when {
-        row.skipped -> Icons.Filled.RemoveCircleOutline to MaterialTheme.colorScheme.onSurfaceVariant
-        row.isReady() -> Icons.Filled.CheckCircle to Color(0xFF2E7D32)
+        row.ready -> Icons.Filled.CheckCircle to Color(0xFF2E7D32)
         s == null -> Icons.Filled.HelpOutline to MaterialTheme.colorScheme.onSurfaceVariant
         else -> Icons.Filled.ErrorOutline to Color(0xFFB26A00)
     }
@@ -187,39 +199,77 @@ private fun SiteLine(row: SiteRow, onSetUp: (String) -> Unit, onSkip: (String, B
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp).padding(top = 2.dp))
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
-            Text(row.name, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold))
-            if (row.skipped) {
-                Hint("Skipped: left out of searches.")
-            } else {
-                Hint(loginText(s))
-                Hint(locationText(s))
-                row.warning?.takeIf { s?.location == LocationState.Set }?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(row.name, style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold), modifier = Modifier.weight(1f))
+                if (s != null && !row.ready) {
+                    TextButton(onClick = { onSetUp(row.key) }) { Text("Set up") }
                 }
             }
-        }
-        Column(horizontalAlignment = Alignment.End) {
-            if (!row.skipped && !row.isReady()) {
-                TextButton(onClick = { onSetUp(row.key) }) { Text("Set up") }
+            StepLine(
+                text = loginText(row),
+                done = row.loginDone,
+                skipLabel = when {
+                    row.loginDone || s == null -> null
+                    row.loginSkipped -> "Ask again"
+                    else -> "Skip login"
+                },
+                onSkip = { onSkipLogin(row.key, !row.loginSkipped) }
+            )
+            StepLine(
+                text = locationText(row),
+                done = row.locationDone,
+                skipLabel = when {
+                    row.locationDone || s == null -> null
+                    row.locationSkipped -> "Ask again"
+                    else -> "Skip location"
+                },
+                onSkip = { onSkipLocation(row.key, !row.locationSkipped) }
+            )
+            row.warning?.takeIf { s?.location == LocationState.Set && !row.locationSkipped }?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
-            TextButton(onClick = { onSkip(row.key, !row.skipped) }) { Text(if (row.skipped) "Use again" else "Skip") }
         }
     }
 }
 
-private fun loginText(s: SiteStatus?): String = when {
-    s == null -> "Not checked yet"
-    s.login == LoginState.In -> "Logged in"
-    s.login == LoginState.Out -> "Not logged in"
-    else -> "Login not detected yet"
+/** One of a site's two steps, with a small button to skip it or ask again. */
+@Composable
+private fun StepLine(text: String, done: Boolean, skipLabel: String?, onSkip: () -> Unit) {
+    if (text.isEmpty()) return
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (done) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
+        if (skipLabel != null) {
+            TextButton(onClick = onSkip) { Text(skipLabel, style = MaterialTheme.typography.labelSmall) }
+        }
+    }
 }
 
-private fun locationText(s: SiteStatus?): String = when (s?.location) {
-    null -> ""
-    LocationState.Set -> "Delivering to ${s.label ?: "your chosen address"}"
-    LocationState.Guessed -> "Guessing your area" + (s.label?.let { ": $it" } ?: "") + ". Pick your address."
-    LocationState.Missing -> "No delivery address set"
-    LocationState.Unknown -> "Delivery address not detected"
+private fun loginText(row: SiteRow): String {
+    val s = row.status ?: return "Not checked yet"
+    return when {
+        s.login == LoginState.In -> "Logged in"
+        row.loginSkipped -> "Shopping as a guest"
+        s.login == LoginState.Out -> "Not logged in"
+        else -> "Login not detected yet"
+    }
+}
+
+private fun locationText(row: SiteRow): String {
+    val s = row.status ?: return ""
+    if (row.locationSkipped && !row.locationDone) {
+        return "Using the site's own area" + (s.label?.let { ": $it" } ?: "")
+    }
+    return when (s.location) {
+        LocationState.Set -> "Delivering to ${s.label ?: "your chosen address"}"
+        LocationState.Guessed -> "Guessing your area" + (s.label?.let { ": $it" } ?: "") + ". Pick your address."
+        LocationState.Missing -> "No delivery address set"
+        LocationState.Unknown -> "Delivery address not detected"
+    }
 }
 
 /**

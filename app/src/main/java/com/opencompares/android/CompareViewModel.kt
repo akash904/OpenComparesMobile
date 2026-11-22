@@ -208,7 +208,11 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
     val deliveryPoint: Pair<Double, Double>?
         get() = deliveryPlace?.let { it.lat to it.lon } ?: phonePoint
 
-    val skippedSites: Set<String> get() = settings?.skippedSites ?: emptySet()
+    /** Sites used without logging in, by the shopper's choice. */
+    val skippedLogin: Set<String> get() = settings?.skippedLogin ?: emptySet()
+
+    /** Sites used with their own idea of the shopper's area, by the shopper's choice. */
+    val skippedLocation: Set<String> get() = settings?.skippedLocation ?: emptySet()
 
     fun refreshStatus(key: String, store: PaneWebViewStore) {
         val view = store.view(key) ?: return
@@ -219,10 +223,16 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
 
     fun refreshStatuses(store: PaneWebViewStore) = visibleProviders.forEach { refreshStatus(it.key, store) }
 
-    fun setSkipped(key: String, skipped: Boolean) {
+    /** Use a site without logging in (or undo that). The site stays in searches. */
+    fun skipLogin(key: String, skip: Boolean) {
         val current = settings ?: return
-        val updated = if (skipped) current.skippedSites + key else current.skippedSites - key
-        saveSettings(current.copy(skippedSites = updated))
+        saveSettings(current.copy(skippedLogin = if (skip) current.skippedLogin + key else current.skippedLogin - key))
+    }
+
+    /** Use a site with whatever area it picked (or undo that). The site stays in searches. */
+    fun skipLocation(key: String, skip: Boolean) {
+        val current = settings ?: return
+        saveSettings(current.copy(skippedLocation = if (skip) current.skippedLocation + key else current.skippedLocation - key))
     }
 
     fun usePhoneLocation() {
@@ -266,10 +276,12 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    /** True when the site is logged in with a delivery address near the shopper. */
+    /** True when login and address are each either done or skipped by the shopper. */
     fun siteReady(key: String): Boolean {
         val status = siteStatus[key] ?: return false
-        return status.login == LoginState.In && status.location == LocationState.Set && siteWarning(key) == null
+        val loginOk = status.login == LoginState.In || key in skippedLogin
+        val placeOk = (status.location == LocationState.Set && siteWarning(key) == null) || key in skippedLocation
+        return loginOk && placeOk
     }
 
     private suspend fun findPlace(query: String): DeliveryPlace? {
@@ -306,7 +318,7 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
         fullScreenPane = null
         shopping.findBestPrices(object : PaneDriver {
             override val siteKeys = visibleProviders
-                .filter { pane(it).error?.kind != PaneError.Kind.Crashed && it.key !in skippedSites }
+                .filter { pane(it).error?.kind != PaneError.Kind.Crashed }
                 .map { it.key }
 
             override fun warning(key: String) = siteWarning(key)

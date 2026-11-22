@@ -18,9 +18,9 @@
   var ETA_RE = /\b\d{1,3}\s?(?:mins?|minutes|hrs?|hours)\b/i;
   var OOS_RE = /out of stock|sold out|notify me|currently unavailable|not available/i;
   var ADD_RE = /^(?:add|add to cart|add to bag|\+ ?add|add\s*\+)$/i;
-  var NOISE_LINE_RE = /^(?:add|add to cart|add to bag|sponsored|ad|bestseller|new|options?|\d+ options?|view similar|save for later|buy now|notify me|\+|−|-)$/i;
+  var NOISE_LINE_RE = /^(?:add|add to cart|add to bag|sponsored|ad|bestseller|new|off|options?|\d+ options?|view similar|save for later|buy now|notify me|\+|−|-)$/i;
   // Cart and checkout bars carry a price but are not products.
-  var NOT_A_PRODUCT_RE = /^(?:view cart|go to cart|cart|proceed|checkout|place order|pay|total|subtotal|bill details|item total)\b/i;
+  var NOT_A_PRODUCT_RE = /^(?:view cart|go to cart|cart|proceed|checkout|place order|pay|total|subtotal|bill details|item total|unlock free delivery|get free delivery|free delivery)\b/i;
   var QTY_ALL_RE = new RegExp(QTY_RE.source, "gi");
   var WEIGHT_VOLUME_RE = /\d\s?(?:x\s?\d+(?:\.\d+)?\s?)?(?:g|gm|gms|grams?|kg|kgs|ml|l|ltr|litres?|liters?)\b/i;
   var LOGIN_RE = /\blog ?in\b|\bsign ?in\b/i;
@@ -42,8 +42,19 @@
 
   function visible(el) {
     if (!el.getBoundingClientRect) return true;
+    // Zepto wraps names in display:contents spans, which have no box of their own.
+    while (el.parentElement && window.getComputedStyle && getComputedStyle(el).display === "contents") el = el.parentElement;
     var r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
+  }
+
+  // "₹21 OFF" is a saving, not a price. Zepto splits it into "₹21" and "OFF".
+  function isSaving(el) {
+    var next = el.nextElementSibling || (el.nextSibling && el.nextSibling.nodeType === 3 ? el.nextSibling : null);
+    var nextText = next ? (next.textContent || "").trim() : "";
+    if (/^off\b/i.test(nextText)) return true;
+    var parentText = el.parentElement ? (el.parentElement.textContent || "").replace(/\s+/g, " ").trim() : "";
+    return /^(?:save\s)?(?:₹|rs\.?)\s?\d[\d,]*(?:\.\d+)?\s?off$/i.test(parentText);
   }
 
   var BARE_NUMBER_RE = /^\d[\d,]*(?:\.\d{1,2})?$/;
@@ -81,7 +92,7 @@
     for (var c = el.firstElementChild; c; c = c.nextElementSibling) {
       if ((c.textContent || "").replace(/ /g, " ").trim() === t) { childHasIt = true; break; }
     }
-    if (childHasIt || !visible(el)) continue;
+    if (childHasIt || !visible(el) || isSaving(el)) continue;
     priceEls.push({ el: el, text: t, value: amount(t), struck: isStruck(el) });
   }
 
