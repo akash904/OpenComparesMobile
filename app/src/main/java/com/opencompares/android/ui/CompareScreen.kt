@@ -29,6 +29,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
@@ -78,6 +79,7 @@ import com.opencompares.android.GridScrollbar
 import com.opencompares.android.PaneWebViewStore
 import com.opencompares.android.R
 import com.opencompares.android.ScrollChainTarget
+import com.opencompares.android.chatgpt.ChatGptViewModel
 import com.opencompares.android.data.AppSettings
 import kotlinx.coroutines.launch
 
@@ -153,6 +155,8 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
     }
 
     var showSettings by remember { mutableStateOf(false) }
+    var showChatGpt by remember { mutableStateOf(false) }
+    val chatGptViewModel: ChatGptViewModel = viewModel()
     val runSearch: () -> Unit = {
         viewModel.search()
         focusManager.clearFocus()
@@ -182,6 +186,16 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
                     }
                 },
                 actions = {
+                    CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                        IconButton(onClick = { showChatGpt = true }, modifier = Modifier.size(32.dp)) {
+                            Icon(
+                                Icons.Filled.AutoAwesome,
+                                contentDescription = "ChatGPT",
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
                     ZoomControls(
                         zoom = viewModel.globalZoom,
                         onZoomOut = viewModel::zoomOut,
@@ -241,6 +255,10 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
                 )
             }
         }
+    }
+
+    if (showChatGpt) {
+        ChatGptDialog(viewModel = chatGptViewModel, onDismiss = { showChatGpt = false })
     }
 
     if (showSettings && settings != null) {
