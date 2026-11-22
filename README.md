@@ -10,7 +10,8 @@ Open Compares is an Android app that opens several marketplaces at once, such as
 - **Live, personal prices.** Each pane keeps its own login, cart and location.
 - **Flexible layout.** Use one or two columns, adjust pane height and zoom, or open any pane fullscreen.
 - **Custom marketplaces.** Add any site that has a search URL.
-- **Optional ChatGPT sign-in (in development).** Sign in with ChatGPT to use your own ChatGPT plan for AI features. AI requests run from your phone, for your own searches, and Open Compares never sees your ChatGPT password.
+- **Prices on screen.** Read the products, prices, pack sizes and delivery times from every pane into one list, with prices per 100 g, 100 ml or piece. This runs on your phone without AI.
+- **Compare with ChatGPT (optional).** Sign in with ChatGPT to use your own ChatGPT plan to find the same product across sites. The app then shows which site has the best value per unit, using the prices it read itself. AI requests run from your phone, for your own searches, and Open Compares never sees your ChatGPT password.
 
 ### Built-in marketplaces
 
@@ -47,13 +48,15 @@ Run the unit tests:
 | `app/src/main/java/com/opencompares/android/` | Screen state, marketplace list, and WebView pane handling |
 | `.../ui/` | Compose screens: the compare grid, panes, dialogs |
 | `.../data/` | Saved settings, stored with DataStore |
+| `.../prices/` | Reading prices from the panes, unit prices, and the ChatGPT comparison |
+| `app/src/main/assets/price_extractor.js` | The script that finds product cards on any marketplace page |
 | `.../chatgpt/` | Sign in with ChatGPT: OAuth, token storage, and model calls |
 
 ## Privacy
 
 - Marketplace logins, cookies and carts stay inside the app's browser panes on your phone.
 - Location is used only to show your area and is passed only to the marketplace pages you open.
-- If you sign in with ChatGPT, the tokens are encrypted on your phone and are never sent anywhere except OpenAI. AI requests use your own ChatGPT plan and count toward its limits. You can sign out at any time, which also ends the session at OpenAI.
+- If you sign in with ChatGPT, the tokens are encrypted on your phone and are never sent anywhere except OpenAI. AI requests use your own ChatGPT plan and count toward its limits. A comparison sends only the product names, pack sizes, prices, delivery times and stock shown in the prices list; it never sends page addresses, your location or your marketplace accounts. You can sign out at any time, which also ends the session at OpenAI.
 
 ## Contributing
 

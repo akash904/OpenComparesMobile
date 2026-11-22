@@ -16,9 +16,17 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.opencompares.android.data.AppSettings
 import com.opencompares.android.data.SettingsRepository
+import com.opencompares.android.chatgpt.ChatGptAccount
+import com.opencompares.android.chatgpt.SiwcApiException
+import com.opencompares.android.prices.Comparison
+import com.opencompares.android.prices.ComparisonFormatException
+import com.opencompares.android.prices.ComparisonParser
+import com.opencompares.android.prices.ComparisonPrompts
 import com.opencompares.android.prices.PaneReadResult
 import com.opencompares.android.prices.PriceReader
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
@@ -94,6 +102,14 @@ data class PaneState(
     }
 }
 
+/** Progress of a ChatGPT comparison of the prices read from the panes. */
+sealed interface ComparisonState {
+    data object Idle : ComparisonState
+    data object Running : ComparisonState
+    data class Done(val comparison: Comparison) : ComparisonState
+    data class Failed(val message: String, val signInNeeded: Boolean = false) : ComparisonState
+}
+
 class CompareViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = SettingsRepository(application)
@@ -135,10 +151,32 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
     var readingPrices by mutableStateOf(false)
         private set
 
+    private val chatGpt = ChatGptAccount.get(application)
+
+    /** The latest comparison of [priceResults]; reset whenever prices are read again. */
+    var comparison by mutableStateOf<ComparisonState>(ComparisonState.Idle)
+        private set
+
+    private var compareJob: Job? = null
+
+    private var lastReadAtMillis = 0L
+
+    /**
+     * Opening the prices sheet reads the panes afresh, unless a comparison of a recent
+     * read is running or finished, which closing and reopening the sheet should not throw away.
+     */
+    fun openPrices(store: PaneWebViewStore) {
+        val recent = System.currentTimeMillis() - lastReadAtMillis < KEEP_COMPARISON_MS
+        if (recent && (comparison is ComparisonState.Running || comparison is ComparisonState.Done)) return
+        readPrices(store)
+    }
+
     /** Reads product cards from every visible pane, on the device, without any AI. */
     fun readPrices(store: PaneWebViewStore) {
         if (readingPrices) return
         readingPrices = true
+        compareJob?.cancel()
+        comparison = ComparisonState.Idle
         val views = visibleProviders.associate { p ->
             // A crashed pane has no usable page.
             p.key to store.view(p.key)?.takeUnless { pane(p).error?.kind == PaneError.Kind.Crashed }
@@ -146,10 +184,48 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             try {
                 priceResults = priceReader.readAll(views)
+                lastReadAtMillis = System.currentTimeMillis()
             } finally {
                 readingPrices = false
             }
         }
+    }
+
+    /**
+     * Asks ChatGPT, on the user's plan, which listings are the same product. The model only
+     * groups them; best value is worked out here from the prices the app read itself.
+     */
+    fun compareWithChatGpt() {
+        if (comparison is ComparisonState.Running || readingPrices) return
+        val pages = priceResults.filterIsInstance<PaneReadResult.Read>().map { it.page }.filter { it.offers.isNotEmpty() }
+        if (pages.size < 2) {
+            comparison = ComparisonState.Failed("Prices from at least two sites are needed. Search, then read prices again.")
+            return
+        }
+        val prompt = ComparisonPrompts.build(query.trim(), pages) { key ->
+            providers.firstOrNull { it.key == key }?.displayName ?: key
+        }
+        comparison = ComparisonState.Running
+        compareJob = viewModelScope.launch {
+            comparison = try {
+                ComparisonState.Done(ComparisonParser.parse(chatGpt.ask(prompt.instructions, prompt.input), prompt))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: SiwcApiException) {
+                ComparisonState.Failed(e.userMessage, signInNeeded = e.requiresSignIn)
+            } catch (e: ComparisonFormatException) {
+                ComparisonState.Failed("ChatGPT's answer couldn't be read. Try again.")
+            } catch (e: Exception) {
+                ComparisonState.Failed(e.message ?: "The comparison failed. Try again.")
+            }
+        }
+    }
+
+    /** Shows a product's page in its own pane. Only web links are followed. */
+    fun openOffer(key: String, url: String) {
+        if (!url.startsWith("https://") && !url.startsWith("http://")) return
+        updatePane(key) { it.navigate(url) }
+        if (fullScreenPane != null) fullScreenPane = key
     }
 
     init {
@@ -269,5 +345,9 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
                 .joinToString(", ")
                 .ifEmpty { null }
         }
+    }
+
+    private companion object {
+        const val KEEP_COMPARISON_MS = 5 * 60 * 1000L
     }
 }

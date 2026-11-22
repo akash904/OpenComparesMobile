@@ -113,32 +113,56 @@
   }
 
   // 3. Read the fields of each card.
-  function pickName(lines) {
-    var best = "";
+  function nameLike(line) {
+    if (line.length < 3 || line.length > 160) return false;
+    var hasPrice = PRICE_IN_TEXT_RE.test(line);
+    PRICE_IN_TEXT_RE.lastIndex = 0;
+    if (hasPrice) return false;
+    if (NOISE_LINE_RE.test(line) || DISCOUNT_RE.test(line) || ETA_RE.test(line) && line.length < 14) return false;
+    if (QTY_RE.test(line) && line.replace(QTY_RE, "").replace(/[^a-z]/gi, "").length < 3) return false;
+    return !/^[\d.,\s()★☆%]+$/.test(line); // ratings, counts
+  }
+
+  // The name is the most prominent text in the card: largest type, then boldest, then longest.
+  // Instamart, for one, puts a longer description under the name in smaller type.
+  function pickName(card, lines) {
+    var best = "", bestScore = null, els = [];
+    var walker = document.createTreeWalker(card, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      var el = walker.currentNode.parentElement;
+      if (!el || els.indexOf(el) >= 0 || !walker.currentNode.textContent.trim()) continue;
+      els.push(el);
+      var line = text(el);
+      if (line.indexOf("\n") >= 0 || !nameLike(line) || !visible(el)) continue;
+      var cs = getComputedStyle(el);
+      var score = [Math.round((parseFloat(cs.fontSize) || 0) * 2), parseInt(cs.fontWeight, 10) || 400, line.length];
+      if (!bestScore || score[0] > bestScore[0] ||
+          score[0] === bestScore[0] && (score[1] > bestScore[1] || score[1] === bestScore[1] && score[2] > bestScore[2])) {
+        best = line;
+        bestScore = score;
+      }
+    }
+    if (best) return best;
     for (var j = 0; j < lines.length; j++) {
-      var line = lines[j].trim();
-      if (line.length < 3 || line.length > 160) continue;
-      if (PRICE_IN_TEXT_RE.test(line)) { PRICE_IN_TEXT_RE.lastIndex = 0; continue; }
-      PRICE_IN_TEXT_RE.lastIndex = 0;
-      if (NOISE_LINE_RE.test(line) || DISCOUNT_RE.test(line) || ETA_RE.test(line) && line.length < 14) continue;
-      if (QTY_RE.test(line) && line.replace(QTY_RE, "").replace(/[^a-z]/gi, "").length < 3) continue;
-      if (/^[\d.,\s()★☆%]+$/.test(line)) continue; // ratings, counts
-      if (line.length > best.length) best = line;
+      var l = lines[j].trim();
+      if (nameLike(l) && l.length > best.length) best = l;
     }
     return best;
   }
 
   // Pack size: a separate size line beats a size inside the name ("25 g High Protein Milk"),
   // and grams or millilitres beat a bare "1 pack" or "1 pc".
+  // A line that is only a size ("1 ltr", "1 pack (500 ml)") beats one inside a description.
   function pickQuantity(lines, name) {
-    var fallback = null;
+    var best = null, bestRank = 0;
     for (var j = 0; j < lines.length; j++) {
       var line = lines[j].trim();
       if (line === name || line.length > 40 || !QTY_RE.test(line)) continue;
-      if (WEIGHT_VOLUME_RE.test(line)) return line;
-      if (!fallback) fallback = line;
+      var sizeOnly = line.replace(QTY_RE, "").replace(/[^a-z]/gi, "").length <= 6;
+      var rank = (sizeOnly ? 2 : 0) + (WEIGHT_VOLUME_RE.test(line) ? 1 : 0);
+      if (rank > bestRank) { best = line; bestRank = rank; }
     }
-    if (fallback) return fallback;
+    if (best) return best;
     var inName = name.match(QTY_RE);
     return inName ? inName[0] : null;
   }
@@ -149,7 +173,7 @@
     if (!(cards[q].price.value > 0)) continue;
     var body = text(cd);
     var lines = body.split(/\n+/);
-    var name = pickName(lines);
+    var name = pickName(cd, lines);
     if (!name) {
       var img = cd.querySelector("img[alt]");
       if (img && img.alt && img.alt.length > 3) name = img.alt.trim();

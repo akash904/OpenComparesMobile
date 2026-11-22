@@ -56,6 +56,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -73,6 +74,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.opencompares.android.AppLocation
 import com.opencompares.android.CompareViewModel
@@ -80,6 +82,7 @@ import com.opencompares.android.GridScrollbar
 import com.opencompares.android.PaneWebViewStore
 import com.opencompares.android.R
 import com.opencompares.android.ScrollChainTarget
+import com.opencompares.android.chatgpt.AccountState
 import com.opencompares.android.chatgpt.ChatGptViewModel
 import com.opencompares.android.data.AppSettings
 import kotlinx.coroutines.launch
@@ -157,8 +160,9 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
 
     var showSettings by remember { mutableStateOf(false) }
     var showChatGpt by remember { mutableStateOf(false) }
-    var showPrices by remember { mutableStateOf(false) }
+    var showPrices by rememberSaveable { mutableStateOf(false) }
     val chatGptViewModel: ChatGptViewModel = viewModel()
+    val chatGptState by chatGptViewModel.state.collectAsStateWithLifecycle()
     val runSearch: () -> Unit = {
         viewModel.search()
         focusManager.clearFocus()
@@ -192,7 +196,7 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
                         IconButton(
                             onClick = {
                                 showPrices = true
-                                viewModel.readPrices(store)
+                                viewModel.openPrices(store)
                             },
                             modifier = Modifier.size(32.dp)
                         ) {
@@ -278,7 +282,18 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
             results = viewModel.priceResults,
             reading = viewModel.readingPrices,
             providers = viewModel.providers,
+            comparison = viewModel.comparison,
+            chatGptSignedIn = (chatGptState as? AccountState.SignedIn)?.hasPlanUsage == true,
             onRefresh = { viewModel.readPrices(store) },
+            onCompare = viewModel::compareWithChatGpt,
+            onSignIn = {
+                showPrices = false
+                showChatGpt = true
+            },
+            onOpenOffer = { key, url ->
+                viewModel.openOffer(key, url)
+                showPrices = false
+            },
             onDismiss = { showPrices = false }
         )
     }

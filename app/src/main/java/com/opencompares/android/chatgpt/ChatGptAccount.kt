@@ -162,20 +162,35 @@ class ChatGptAccount private constructor(private val appContext: Context) {
     /** Lists the plan's models and streams one short reply, proving the whole chain works. */
     suspend fun testConnection(onDelta: (String) -> Unit): String {
         val token = accessToken()
+        val model = chooseModel(token, refresh = true)
+        val text = client.streamText(token, model, userInput("Reply with exactly: Open Compares is connected."), onDelta = onDelta)
+        return "$model: $text"
+    }
+
+    /** Sends one prompt to the plan's model and returns the whole reply. */
+    suspend fun ask(instructions: String, prompt: String, onDelta: (String) -> Unit = {}): String {
+        val token = accessToken()
+        val model = chooseModel(token, refresh = false)
+        return client.streamText(token, model, userInput(prompt), instructions, onDelta)
+    }
+
+    /** The saved model if the plan still offers it, else the plan's first listed model. */
+    private suspend fun chooseModel(token: String, refresh: Boolean): String {
         val creds = withContext(Dispatchers.IO) { store.load() }
+        val saved = creds?.preferredModel
+        if (!refresh && saved != null) return saved
         val models = client.listModels(token)
-        val model = creds?.preferredModel?.takeIf { p -> models.any { it.slug == p } }
+        val model = saved?.takeIf { p -> models.any { it.slug == p } }
             ?: models.firstOrNull()?.slug
             ?: throw IllegalStateException("No models are available on this ChatGPT plan.")
         if (creds != null && creds.preferredModel != model) {
             withContext(Dispatchers.IO) { store.save(creds.copy(preferredModel = model)) }
         }
-        val input = JSONArray().put(
-            JSONObject().put("role", "user").put("content", "Reply with exactly: Open Compares is connected.")
-        )
-        val text = client.streamText(token, model, input, onDelta = onDelta)
-        return "$model: $text"
+        return model
     }
+
+    private fun userInput(text: String): JSONArray =
+        JSONArray().put(JSONObject().put("role", "user").put("content", text))
 
     suspend fun dismissWelcome() {
         val updated = withContext(Dispatchers.IO) {
