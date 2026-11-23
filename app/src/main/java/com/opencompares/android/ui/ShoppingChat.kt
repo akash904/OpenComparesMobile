@@ -77,6 +77,8 @@ fun ShoppingChat(
     onFillCarts: (BasketResult, List<String>) -> Unit,
     onOpenCart: (String) -> Unit,
     onEmptyAdded: (SiteCart) -> Unit,
+    /** Asks to empty these sites' carts completely. */
+    onEmptyCarts: (List<String>) -> Unit,
     cartCount: (String) -> Int?,
     modifier: Modifier = Modifier,
     /** Shown under the greeting: the shopper's sites and delivery location. */
@@ -146,7 +148,8 @@ fun ShoppingChat(
                             siteName = siteName,
                             busy = work != ShoppingWork.Idle,
                             onOpenCart = onOpenCart,
-                            onEmptyAdded = onEmptyAdded
+                            onEmptyAdded = onEmptyAdded,
+                            onEmptyCarts = onEmptyCarts
                         )
                     }
                 }

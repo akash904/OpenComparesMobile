@@ -5,7 +5,9 @@
  * price, and reads or presses its ADD button or quantity stepper. One action per run: the app
  * waits between runs so the site can update. It never goes near checkout or payment.
  *
- * Called with {mode: "find" | "add" | "plus" | "minus" | "variant" | "confirm", name, price}.
+ * Called with {mode: "find" | "add" | "plus" | "minus" | "variant" | "confirm" | "lines" | "removeOne", name, price}.
+ * "lines" and "removeOne" work on a cart page without a name: they count every line's items,
+ * or take one item out of the first line, returning {lines, units, pressed}.
  * "variant" and "confirm" work in a pack-size picker some sites open after ADD (Instamart):
  * the first adds the row with the right price, the second closes the picker with Confirm. An empty price matches
  * any price, for cart pages that show line totals.
@@ -94,6 +96,15 @@
       if (plusish) {
         for (var box0 = minusish.parentElement, d0 = 0; box0 && d0 < 4; box0 = box0.parentElement, d0++) {
           if (!box0.contains(plusish)) continue;
+          // A count that says itself in words, e.g. Instamart's "Current item count is 1": its
+          // rolling digits keep the next number on the page too.
+          var said = box0.querySelectorAll('[aria-label*="count" i], [aria-label*="quantity" i]');
+          for (var q = 0; q < said.length; q++) {
+            var qm = /\b(\d{1,2})\b/.exec(said[q].getAttribute("aria-label"));
+            if (qm && said[q] !== minusish && said[q] !== plusish && qm[1] !== "0") {
+              return { count: parseInt(qm[1], 10), plus: clickable(plusish), minus: clickable(minusish) };
+            }
+          }
           var tw = document.createTreeWalker(box0, NodeFilter.SHOW_TEXT);
           while (tw.nextNode()) {
             var n0 = tw.currentNode.textContent.trim();
@@ -237,6 +248,79 @@
       }
     }
     return JSON.stringify({ found: false, picker: true });
+  }
+
+  // Every line's stepper on a cart page, without knowing the product names.
+  function cartSteppers() {
+    var found = [];
+    function keep(s) {
+      var known = found.some(function (f) { return f.minus === s.minus; });
+      if (!known) found.push(s);
+    }
+    // Counts that say themselves in words come first (Instamart's "Current item count is 1"):
+    // its spare rolling digits would otherwise look like a list of tiny steppers.
+    var said = document.querySelectorAll('[aria-label*="count" i], [aria-label*="quantity" i]');
+    for (var i = 0; i < said.length; i++) {
+      var sm = /\b(\d{1,2})\b/.exec(said[i].getAttribute("aria-label"));
+      if (!sm || sm[1] === "0" || said[i].closest("header, nav, footer, [role=dialog], [role=alertdialog], dialog")) continue;
+      for (var b = said[i].parentElement, up = 0; b && b !== document.body && up < 4; b = b.parentElement, up++) {
+        var s0 = stepper(b);
+        if (!s0 || !s0.minus || s0.minus.closest("[aria-hidden=true]")) continue;
+        keep(s0);
+        break;
+      }
+    }
+    var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      var t = walker.currentNode.textContent.trim();
+      var el = walker.currentNode.parentElement;
+      if (!/^\d{1,2}$/.test(t) || t === "0" || !el || el.getBoundingClientRect().width === 0) continue;
+      // Not the cart badge in the site's header or menu, nor anything in a prompt.
+      if (el.closest("header, nav, footer, [role=dialog], [role=alertdialog], dialog")) continue;
+      // The nearest box around the number that holds a stepper, never a whole list.
+      for (var a = el, depth = 0; a && a !== document.body && depth < 6; a = a.parentElement, depth++) {
+        if (isList(a)) break;
+        var s = stepper(a);
+        // Instamart rolls its count like an odometer, with spare digits in hidden boxes beside
+        // it; those boxes are not controls. A real − is never hidden from screen readers.
+        if (!s || !s.minus || s.minus.closest("[aria-hidden=true]")) continue;
+        keep(s);
+        break;
+      }
+    }
+    return found;
+  }
+
+  // Some sites ask "Remove this item?" when the last one is taken out: say yes.
+  function confirmRemoval() {
+    var dialogs = document.querySelectorAll("[role=dialog], [role=alertdialog], dialog");
+    for (var d = dialogs.length - 1; d >= 0; d--) {
+      var box = dialogs[d];
+      if (box.getBoundingClientRect().height === 0 || !/remove|delete|clear/i.test(box.innerText || "")) continue;
+      var yes = Array.prototype.slice.call(box.querySelectorAll("button, [role=button]")).filter(function (b) {
+        return /^(remove|remove item|yes|yes,? remove|delete|ok)$/i.test(visibleText(b));
+      }).pop();
+      if (yes) {
+        yes.click();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // "lines" reads a cart page's lines; "removeOne" takes one item out of the first line.
+  if (args.mode === "lines" || args.mode === "removeOne") {
+    if (args.mode === "removeOne" && confirmRemoval()) {
+      return JSON.stringify({ lines: -1, units: -1, pressed: true });
+    }
+    var steps = cartSteppers();
+    var units = steps.reduce(function (n, s) { return n + s.count; }, 0);
+    var pressed = false;
+    if (args.mode === "removeOne" && steps.length) {
+      steps[0].minus.click();
+      pressed = true;
+    }
+    return JSON.stringify({ lines: steps.length, units: units, pressed: pressed });
   }
 
   var cards = findCards();

@@ -12,6 +12,7 @@ Open Compares is an Android app that opens several marketplaces at once, such as
 - **Custom marketplaces.** Add any site that has a search URL.
 - **Shopping chat (optional, uses ChatGPT).** The app opens with "What do you want to buy?". Type your list, adjust it by chatting, and the app searches every site for each item in its own pane. It then shows what the whole list costs on each site, which items a site is missing, and the cheapest way to split the order.
 - **Real totals with all charges.** After you confirm which sites to use, the app adds the items to each site's cart and reads its bill: delivery, handling, small-cart and platform fees, discounts and the amount to pay. It shows the cheapest site for the whole list and whether splitting the order could save money. Nothing is ordered; you check out yourself in the site's pane, and "Remove what was added" takes the app's items back out.
+- **Empty carts in one go.** "Empty carts" in Your sites (or under the real totals) opens each chosen site's cart and takes everything out, so you don't have to clear five carts by hand. It asks first, since it removes items you added on the site yourself too.
 - **Site setup.** A "Your sites" card shows, for each marketplace, whether you're logged in and which address it delivers to, and warns when a site is only guessing your city or is set to another area. "Set up" opens the site with a checklist that ticks off as you log in and pick your address. Logging in is optional: skip any site and it's left out of searches.
 - **One delivery location for every site.** Use your phone's location, or type an area or pincode once. When a site asks for your location, it gets that one.
 - **Prices on screen.** Read the products, prices, pack sizes and delivery times from every pane into one list, with prices per 100 g, 100 ml or piece. This runs on your phone without AI.
@@ -54,7 +55,7 @@ Run the unit tests:
 | `.../data/` | Saved settings, stored with DataStore |
 | `.../prices/` | Reading prices from the panes, unit prices, and the ChatGPT comparison |
 | `.../shopping/` | The shopping chat: list parsing, searching each site, matching, basket totals and carts |
-| `app/src/main/assets/cart_actions.js`, `bill_reader.js` | Press ADD, + and − on a product's card, and read a cart page's bill |
+| `app/src/main/assets/cart_actions.js`, `bill_reader.js` | Press ADD, + and − on a product's card, empty a cart page, and read its bill |
 | `app/src/main/assets/price_extractor.js` | The script that finds product cards on any marketplace page |
 | `.../chatgpt/` | Sign in with ChatGPT: OAuth, token storage, and model calls |
 

@@ -99,6 +99,55 @@ fun CartConfirmDialog(
     )
 }
 
+/**
+ * Asks which sites' carts to empty. Every site starts ticked; emptying takes out everything,
+ * items the shopper added on the site too, so the dialog says so.
+ */
+@Composable
+fun EmptyCartsDialog(
+    siteKeys: List<String>,
+    siteName: (String) -> String,
+    cartCount: (String) -> Int?,
+    onConfirm: (List<String>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val chosen = remember { mutableStateListOf<String>().apply { addAll(siteKeys) } }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Empty carts") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "The app opens each site's cart and takes everything out, including items you added on the site yourself.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                siteKeys.forEach { key ->
+                    Row(
+                        Modifier.fillMaxWidth().clickable { if (key in chosen) chosen.remove(key) else chosen.add(key) },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(checked = key in chosen, onCheckedChange = { if (it) chosen.add(key) else chosen.remove(key) })
+                        Text(siteName(key), style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                        cartCount(key)?.let { n ->
+                            Text(
+                                if (n == 0) "empty" else "$n item${if (n == 1) "" else "s"}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(siteKeys.filter { it in chosen }) }, enabled = chosen.isNotEmpty()) {
+                Text("Empty carts")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
+}
+
 /** Each filled cart's real bill, and what that means for where to order. */
 @Composable
 fun CartCard(
@@ -106,7 +155,8 @@ fun CartCard(
     siteName: (String) -> String,
     busy: Boolean,
     onOpenCart: (String) -> Unit,
-    onEmptyAdded: (SiteCart) -> Unit
+    onEmptyAdded: (SiteCart) -> Unit,
+    onEmptyCarts: (List<String>) -> Unit
 ) {
     Column(
         Modifier
@@ -137,6 +187,11 @@ fun CartCard(
             HorizontalDivider()
             Spacer(Modifier.height(6.dp))
             SiteBill(cart, siteName(cart.providerKey), isBest = cart == best, busy = busy, onOpenCart = onOpenCart, onEmptyAdded = onEmptyAdded)
+        }
+        Spacer(Modifier.height(6.dp))
+        HorizontalDivider()
+        TextButton(onClick = { onEmptyCarts(comparison.carts.map { it.providerKey }) }, enabled = !busy) {
+            Text("Empty all these carts")
         }
     }
 }

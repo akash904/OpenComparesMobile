@@ -75,6 +75,24 @@ class CartTest {
         assertTrue(s.canPlus)
     }
 
+    @Test
+    fun cartLinesParse() {
+        val lines = CartLines.parse(JSONObject("""{"lines":2,"units":3,"pressed":true}"""))
+        assertEquals(CartLines(2, 3, true), lines)
+        assertEquals(CartLines(0, 0, false), CartLines.parse(JSONObject("{}")))
+    }
+
+    @Test
+    fun emptiedCartsDescribeThemselves() {
+        assertEquals("Zepto: emptied, took out 3 items.", EmptiedCart("zepto", removed = 3, left = 0).describe("Zepto"))
+        assertEquals("Blinkit: already empty.", EmptiedCart("blinkit", 0, 0, wasEmpty = true).describe("Blinkit"))
+        assertEquals(
+            "Amazon Now: took out 1 item, 2 items still there. Open its cart to remove the rest.",
+            EmptiedCart("amazon", removed = 1, left = 2).describe("Amazon Now")
+        )
+        assertEquals("Instamart: no cart.", EmptiedCart("instamart", 0, 0, problem = "no cart.").describe("Instamart"))
+    }
+
     private fun offer(name: String, price: Double, qty: String) = Offer(
         name = name, price = price, mrp = null, discountText = null, quantity = Quantity.parse(qty),
         quantityText = qty, etaText = null, inStock = true, canAdd = true, link = null

@@ -90,6 +90,7 @@ import com.opencompares.android.ScrollChainTarget
 import com.opencompares.android.chatgpt.AccountState
 import com.opencompares.android.chatgpt.ChatGptViewModel
 import com.opencompares.android.data.AppSettings
+import com.opencompares.android.shopping.ShoppingWork
 import kotlinx.coroutines.launch
 
 /** Search once, see every selected marketplace side by side. */
@@ -171,6 +172,20 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
     // The app opens on the shopping chat; the sites are one tap away underneath it.
     var showChat by rememberSaveable { mutableStateOf(true) }
     var confirmReset by remember { mutableStateOf(false) }
+    // Sites offered in the empty-carts dialog, while it is open.
+    var emptyChoice by remember { mutableStateOf<List<String>?>(null) }
+    emptyChoice?.let { keys ->
+        EmptyCartsDialog(
+            siteKeys = keys,
+            siteName = { key -> viewModel.providers.firstOrNull { it.key == key }?.displayName ?: key },
+            cartCount = { key -> viewModel.siteStatus[key]?.cartCount },
+            onConfirm = { chosen ->
+                emptyChoice = null
+                viewModel.emptyCarts(store, chosen)
+            },
+            onDismiss = { emptyChoice = null }
+        )
+    }
     if (confirmReset) {
         AlertDialog(
             onDismissRequest = { confirmReset = false },
@@ -386,7 +401,10 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
                         onSkipLogin = viewModel::skipLogin,
                         onSkipLocation = viewModel::skipLocation,
                         onManagePlatforms = { showSettings = true },
-                        onCheckAgain = { viewModel.refreshStatuses(store) }
+                        onCheckAgain = { viewModel.refreshStatuses(store) },
+                        onEmptyCarts = if (viewModel.shopping.work == ShoppingWork.Idle && viewModel.cartSites.isNotEmpty()) {
+                            { emptyChoice = viewModel.cartSites.map { it.key } }
+                        } else null
                     )
                 }
                 ShoppingChat(
@@ -405,6 +423,7 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
                         showChat = false
                     },
                     onEmptyAdded = { cart -> viewModel.emptyAdded(store, cart) },
+                    onEmptyCarts = { keys -> emptyChoice = keys },
                     cartCount = { key -> viewModel.siteStatus[key]?.cartCount },
                     modifier = Modifier.fillMaxSize(),
                     sitesCard = sitesCard

@@ -84,6 +84,41 @@ data class CardState(
     }
 }
 
+/** A cart page's lines as the cart script sees them: lines with a stepper, and items across them. */
+data class CartLines(
+    val lines: Int,
+    val units: Int,
+    /** The script pressed − (or said yes to a "remove?" prompt). */
+    val pressed: Boolean
+) {
+    companion object {
+        fun parse(json: JSONObject) = CartLines(
+            lines = json.optInt("lines", 0),
+            units = json.optInt("units", 0),
+            pressed = json.optBoolean("pressed")
+        )
+    }
+}
+
+/** What emptying one site's cart did. */
+data class EmptiedCart(
+    val providerKey: String,
+    val removed: Int,
+    /** Items still in the cart afterwards. */
+    val left: Int,
+    val wasEmpty: Boolean = false,
+    val problem: String? = null
+) {
+    fun describe(name: String): String = when {
+        problem != null -> "$name: $problem"
+        wasEmpty -> "$name: already empty."
+        left == 0 -> "$name: emptied, took out ${items(removed)}."
+        else -> "$name: took out ${items(removed)}, ${items(left)} still there. Open its cart to remove the rest."
+    }
+
+    private fun items(n: Int) = "$n item${if (n == 1) "" else "s"}"
+}
+
 /** One item the app tried to put in a site's cart. */
 data class AddedItem(
     val item: WantedItem,

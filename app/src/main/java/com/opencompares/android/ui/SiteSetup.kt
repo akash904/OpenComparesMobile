@@ -78,7 +78,9 @@ fun SitesCard(
     onSkipLogin: (String, Boolean) -> Unit,
     onSkipLocation: (String, Boolean) -> Unit,
     onManagePlatforms: () -> Unit,
-    onCheckAgain: () -> Unit
+    onCheckAgain: () -> Unit,
+    /** Opens the empty-carts dialog; null while the app is busy with the panes. */
+    onEmptyCarts: (() -> Unit)?
 ) {
     val readyCount = rows.count { it.ready }
     val active = rows.size
@@ -144,6 +146,7 @@ fun SitesCard(
             TextButton(onClick = onManagePlatforms) { Text("Manage platforms") }
             TextButton(onClick = onCheckAgain) { Text("Check again") }
         }
+        TextButton(onClick = { onEmptyCarts?.invoke() }, enabled = onEmptyCarts != null) { Text("Empty carts") }
     }
 }
 

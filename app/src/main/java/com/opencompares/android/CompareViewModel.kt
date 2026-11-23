@@ -345,6 +345,15 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
         shopping.emptyAdded(paneDriver(store), cart)
     }
 
+    /** Visible sites whose cart page the app knows, so it can empty them. */
+    val cartSites: List<Provider> get() = visibleProviders.filter { it.cartUrl != null }
+
+    /** Takes everything out of the chosen sites' carts. */
+    fun emptyCarts(store: PaneWebViewStore, siteKeys: List<String>) {
+        fullScreenPane = null
+        shopping.emptyCarts(paneDriver(store), siteKeys)
+    }
+
     /** Shows a site's cart full screen, to check out there; without a known cart page, the site itself. */
     fun openCart(key: String) {
         val provider = providers.firstOrNull { it.key == key } ?: return

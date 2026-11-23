@@ -258,16 +258,7 @@ class ShoppingSession(
         if (work != ShoppingWork.Idle || siteKeys.isEmpty()) return
         job = scope.launch {
             // Each site works in its own pane, so all of them fill at the same time.
-            val progress = LinkedHashMap<String, String>()
-            fun show(site: String, step: String) {
-                progress[driver.siteName(site)] = step
-                work = ShoppingWork.Carting(
-                    siteName = "",
-                    step = progress.entries.joinToString("\n") { (n, st) -> "$n: $st" },
-                    number = progress.values.count { it == DONE_STEP },
-                    total = progress.size
-                )
-            }
+            val show = progressShower(driver)
             val carts = java.util.Collections.synchronizedList(mutableListOf<SiteCart>())
             try {
                 val jobs = siteKeys.mapNotNull { site ->
@@ -293,6 +284,108 @@ class ShoppingSession(
                 work = ShoppingWork.Idle
             }
         }
+    }
+
+    /** Shows each site's step, one line per site, while sites work in their panes at once. */
+    private fun progressShower(driver: PaneDriver): (String, String) -> Unit {
+        val progress = LinkedHashMap<String, String>()
+        return { site, step ->
+            progress[driver.siteName(site)] = step
+            work = ShoppingWork.Carting(
+                siteName = "",
+                step = progress.entries.joinToString("\n") { (n, st) -> "$n: $st" },
+                number = progress.values.count { it == DONE_STEP },
+                total = progress.size
+            )
+        }
+    }
+
+    /**
+     * Empties each chosen site's cart completely, the shopper's own items too, by pressing −
+     * on its cart page until nothing is left. All sites work at the same time.
+     */
+    fun emptyCarts(driver: PaneDriver, siteKeys: List<String>) {
+        if (work != ShoppingWork.Idle || siteKeys.isEmpty()) return
+        job = scope.launch {
+            val show = progressShower(driver)
+            val done = java.util.Collections.synchronizedList(mutableListOf<EmptiedCart>())
+            fun report(title: String) {
+                val lines = siteKeys.mapNotNull { k -> done.firstOrNull { it.providerKey == k } }
+                    .joinToString("\n") { it.describe(driver.siteName(it.providerKey)) }
+                add { ChatEntry.FromAssistant(it, if (lines.isEmpty()) title else "$title\n$lines") }
+            }
+            try {
+                siteKeys.map { site ->
+                    show(site, "waiting")
+                    async { clearCart(driver, site) { step -> show(site, step) }.also { done += it } }
+                }.awaitAll()
+                report("Carts:")
+            } catch (e: CancellationException) {
+                report("Stopped emptying carts.")
+                throw e
+            } catch (e: Exception) {
+                fail(e)
+            } finally {
+                work = ShoppingWork.Idle
+            }
+        }
+    }
+
+    /** Takes every item out of one site's cart, reporting each step through [show]. */
+    private suspend fun clearCart(driver: PaneDriver, site: String, show: (String) -> Unit): EmptiedCart {
+        show("opening the cart")
+        if (!openCart(driver, site)) return EmptiedCart(site, 0, 0, problem = "the app doesn't know its cart page.")
+        // Cart pages draw their lines a moment after loading; an empty cart says so instead.
+        var lines: CartLines? = null
+        var emptyReads = 0
+        for (attempt in 0 until MAX_READS) {
+            delay(READ_INTERVAL_MS)
+            lines = cartLines(driver, site, "lines")
+            if ((lines?.lines ?: 0) > 0) break
+            if (pageSaysEmpty(driver, site) && ++emptyReads >= 2) break
+        }
+        val start = lines?.units ?: 0
+        if (start == 0) {
+            show(DONE_STEP)
+            return if (emptyReads >= 2) EmptiedCart(site, 0, 0, wasEmpty = true)
+            else EmptiedCart(site, 0, 0, problem = "couldn't find any items on its cart page. If it has some, remove them in its pane.")
+        }
+        var left = start
+        // A page can redraw a line just after the last − was pressed: look once more at the end.
+        for (round in 0 until 2) {
+            var stuck = 0
+            var presses = 0
+            while (left > 0 && stuck < MAX_STUCK_PRESSES && presses++ < MAX_EMPTY_PRESSES) {
+                show("removing (${(start - left).coerceAtLeast(0)} of $start out)")
+                if (cartLines(driver, site, "removeOne")?.pressed != true) break
+                delay(STEP_DELAY_MS)
+                val now = cartLines(driver, site, "lines")?.units ?: break
+                if (now < left) stuck = 0 else stuck++
+                left = now
+            }
+            if (left > 0) break
+            delay(READ_INTERVAL_MS)
+            left = cartLines(driver, site, "lines")?.units ?: 0
+            if (left == 0) break
+        }
+        // Refresh what the app knows about this site's cart.
+        driver.cartCount(site)
+        show(DONE_STEP)
+        return EmptiedCart(site, removed = (start - left).coerceAtLeast(0), left = left)
+    }
+
+    private suspend fun cartLines(driver: PaneDriver, site: String, mode: String): CartLines? {
+        val view = driver.view(site) ?: return null
+        val args = JSONObject().put("mode", mode).put("name", "").put("price", "")
+        val raw = runPageScript(view, scripts.load(CART_SCRIPT).replace("__OC_ARGS__", args.toString())) ?: return null
+        return runCatching { CartLines.parse(JSONObject(raw)) }.getOrNull()
+    }
+
+    /** True if the open cart page says the cart is empty. */
+    private suspend fun pageSaysEmpty(driver: PaneDriver, site: String): Boolean {
+        val view = driver.view(site) ?: return false
+        val raw = runPageScript(view, scripts.load(BILL_SCRIPT)) ?: return false
+        return runCatching { JSONObject(raw).optBoolean("empty") }.getOrDefault(false)
     }
 
     /** Fills one site's cart and reads its bill, reporting each step through [show]. */
@@ -596,6 +689,10 @@ class ShoppingSession(
         private const val STEP_DELAY_MS = 1_500L
         private const val DONE_STEP = "done"
         private const val LATE_COUNT_CHECKS = 3
+        /** Presses of − in a row that take nothing out before a site is given up on. */
+        private const val MAX_STUCK_PRESSES = 3
+        /** At most this many presses per site, so a page that never empties can't hold things up. */
+        private const val MAX_EMPTY_PRESSES = 60
         private const val CART_SCRIPT = "cart_actions.js"
         private const val LOGIN_PROBLEM = "The site asked you to log in."
         private const val LOCATION_PROBLEM = "The site asked for a delivery address."
