@@ -9,7 +9,9 @@
  */
 (function () {
   var HEADING_RE = /^(bill details|bill summary|price details|order summary|payment summary|bill)$/i;
-  var TOTAL_RE = /^(to pay|grand total|total payable|total amount|amount payable|net payable|order total|total)$/i;
+  var TOTAL_RE = /^(to pay|you pay|grand total|total payable|total amount|amount payable|net payable|order total|total)$/i;
+  // Side notes inside a line, such as Amazon's "Free for" (Prime) or "Inclusive of taxes": not line names.
+  var NOTE_RE = /^(free\b|for\b|inclusive|incl\.|includes\b|prime\b)/i;
   var SKIP_RE = /tip|donation|feeding india|charity/i;
   var AMOUNT_RE = /^[-−]?\s?(?:₹|rs\.?)\s?[\d,]+(?:\.\d{1,2})?$/i;
   var FREE_RE = /^free$/i;
@@ -55,7 +57,11 @@
   for (var i = 0; i < all.length; i++) {
     if (HEADING_RE.test(all[i].text)) { start = i; break; }
   }
-  if (start < 0) return JSON.stringify({ found: false, rows: [], toPay: null, freeDeliveryAbove: null });
+  if (start < 0) {
+    var empty = /your (shopping )?(cart|basket) is( getting)? (empty|lonely)|cart is empty|no items in (your )?cart/i.test(
+      (document.body.innerText || "").slice(0, 1500));
+    return JSON.stringify({ found: false, empty: empty, rows: [], toPay: null, freeDeliveryAbove: null });
+  }
 
   var rows = [];
   var toPay = null;
@@ -79,6 +85,7 @@
     var m = p.text.match(/free (?:delivery )?(?:above|over|on orders above|for orders above) (?:₹|rs\.?)\s?([\d,]+)/i);
     if (m) { freeAbove = parseFloat(m[1].replace(/,/g, "")); continue; }
     if (BADGE_RE.test(p.text)) continue;
+    if (NOTE_RE.test(p.text) && !FREE_RE.test(p.text)) continue;
     if (AMOUNT_RE.test(p.text) || FREE_RE.test(p.text)) {
       if (label) amounts.push({ text: p.text, struck: p.struck, free: FREE_RE.test(p.text) });
       continue;

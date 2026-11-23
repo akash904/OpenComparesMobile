@@ -39,6 +39,16 @@ class OffersTest {
     }
 
     @Test
+    fun weightRangesUseTheirMiddle() {
+        // Flipkart Minutes sells vegetables by range.
+        assertEquals(Quantity(500.0, Quantity.BaseUnit.GRAM), q("450-550g"))
+        assertEquals(Quantity(2000.0, Quantity.BaseUnit.GRAM), q("1.95-2.05Kg"))
+        assertEquals(Quantity(1000.0, Quantity.BaseUnit.GRAM), q("0.95-1.05Kg"))
+        // Zepto's "900 g - 1 kg" has a unit on each side; the first size still counts.
+        assertEquals(Quantity(900.0, Quantity.BaseUnit.GRAM), q("900 g - 1 kg"))
+    }
+
+    @Test
     fun noQuantityGivesNull() {
         assertNull(q(null))
         assertNull(q("Amul Taaza Toned Milk"))

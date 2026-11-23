@@ -126,6 +126,7 @@ private fun SiteHeader(name: String, result: PaneReadResult) {
     val detail = when (result) {
         is PaneReadResult.Read -> when {
             result.page.offers.isNotEmpty() -> "${result.page.offers.size} products"
+            result.page.needsLocation -> "This site wants a delivery address first. Set it in its pane, then read again."
             result.page.needsLogin -> "This site wants you to log in first. Log in inside its pane, then read again."
             result.page.scannedPrices == 0 -> "No prices on this page yet. Search first, or wait for it to load."
             else -> "Prices found, but no products recognised on this page."

@@ -24,6 +24,8 @@
   var QTY_ALL_RE = new RegExp(QTY_RE.source, "gi");
   var WEIGHT_VOLUME_RE = /\d\s?(?:x\s?\d+(?:\.\d+)?\s?)?(?:g|gm|gms|grams?|kg|kgs|ml|l|ltr|litres?|liters?)\b/i;
   var LOGIN_RE = /\blog ?in\b|\bsign ?in\b/i;
+  // Pages that want a delivery address before showing products (Flipkart Minutes).
+  var LOCATION_WALL_RE = /select (a |your )?delivery (address|location)|use my current location|enter (your )?(delivery )?(pincode|location|address)/i;
 
   function text(el) {
     var t = (el.innerText !== undefined ? el.innerText : el.textContent) || "";
@@ -236,13 +238,19 @@
   products.sort(function (x, y) { return x.top - y.top; });
 
   // No prices but a login prompt usually means the site wants the user to sign in first.
-  var needsLogin = products.length === 0 && LOGIN_RE.test(text(document.body).slice(0, 4000));
+  // No products but an address picker means the site wants a delivery address; that page often
+  // mentions logging in too ("Login to see saved addresses"), so check it first.
+  var head = text(document.body).slice(0, 4000);
+  var needsLocation = products.length === 0 &&
+    (LOCATION_WALL_RE.test(head) || /hyperlocal-preview-page/.test(location.pathname));
+  var needsLogin = products.length === 0 && !needsLocation && LOGIN_RE.test(head);
 
   return JSON.stringify({
     url: location.href,
     title: document.title,
     products: products,
     scannedPrices: priceEls.length,
-    needsLogin: needsLogin
+    needsLogin: needsLogin,
+    needsLocation: needsLocation
   });
 })();

@@ -346,6 +346,8 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
                         onSetUp = { key ->
                             setupSite = key
                             showChat = false
+                            // Sites show the login and address on their home page, not on search or cart pages.
+                            viewModel.goHome(key)
                             viewModel.openFullscreen(key)
                         },
                         onSkipLogin = viewModel::skipLogin,

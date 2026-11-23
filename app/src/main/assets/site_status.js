@@ -112,6 +112,36 @@
     else if (out.loginWall) out.login = "out";
   }
 
+  else if (/(^|\.)amazon\.in$/.test(host)) {
+    // "Deliver to akash - New Delhi 110070": a name before the dash means logged in.
+    var deliver = null;
+    var aw = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    while (aw.nextNode()) {
+      var at = aw.currentNode.textContent.replace(/\s+/g, " ").trim();
+      if (/^deliver(ing)? to /i.test(at) && at.length < 90) { deliver = at; break; }
+    }
+    if (deliver) {
+      var rest = deliver.replace(/^deliver(ing)? to /i, "");
+      var dash = rest.indexOf(" - ");
+      out.login = dash > 0 ? "in" : "unknown";
+      out.location = "set";
+      out.label = dash > 0 ? rest.slice(dash + 3) : rest;
+    } else {
+      out.location = /select (a |your )?location/i.test(body) ? "missing" : "unknown";
+    }
+    if (/\bsign ?in\b/i.test(body.slice(0, 600)) && out.login !== "in") out.login = "out";
+  } else if (/(^|\.)flipkart\.com$/.test(host)) {
+    var logged = null;
+    try { logged = localStorage.getItem("isLoggedIn"); } catch (e) {}
+    if (logged === "true") out.login = "in";
+    else if (logged === "false") out.login = "out";
+    var pin = null;
+    try { pin = localStorage.getItem("mypin"); } catch (e) {}
+    if (/hyperlocal-preview-page/.test(location.pathname)) out.location = "missing";
+    else if (pin && /^\d{6}$/.test(pin)) { out.location = "set"; out.label = "PIN " + pin; }
+    else out.location = "unknown";
+  }
+
   // Any site: a "Select location" prompt at the top means no address is chosen yet,
   // and a visible "Login" button in the header means the shopper is logged out.
   var header = headerLines();

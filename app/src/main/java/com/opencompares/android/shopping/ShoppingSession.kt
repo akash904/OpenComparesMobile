@@ -43,6 +43,8 @@ sealed interface ChatEntry {
         val needLogin: List<String>,
         /** Sites that showed nothing usable for any item. */
         val noResults: List<String>,
+        /** Sites that asked for a delivery address instead of showing results. */
+        val needLocation: List<String> = emptyList(),
         /** Sites whose delivery address may not be the shopper's, in words. */
         val warnings: List<String> = emptyList(),
         /** Says which items reused earlier results instead of being searched again. */
@@ -179,7 +181,7 @@ class ShoppingSession(
                         }
                         // A login wall is not a result worth keeping; try that site again next time.
                         fetched.forEach { (key, page) ->
-                            if (page != null && !page.needsLogin) pageCache[cacheKey(key, item.search)] = CachedPage(page, System.currentTimeMillis())
+                            if (page != null && !page.needsLogin && !page.needsLocation) pageCache[cacheKey(key, item.search)] = CachedPage(page, System.currentTimeMillis())
                         }
                         val fresh = fetched.toMap()
                         ItemSearch(item, sites.mapNotNull { key -> fresh[key] ?: pageCache[cacheKey(key, item.search)]?.page })
@@ -189,10 +191,13 @@ class ShoppingSession(
                 }
                 val pagesBySite = searches.flatMap { it.pages }.groupBy { it.providerKey }
                 val needLogin = sites.filter { key -> pagesBySite[key]?.all { it.needsLogin } == true }
-                val noResults = sites.filter { key -> key !in needLogin && pagesBySite[key].orEmpty().all { it.offers.isEmpty() } }
+                val needLocation = sites.filter { key -> pagesBySite[key]?.all { it.needsLocation } == true }
+                val noResults = sites.filter { key ->
+                    key !in needLogin && key !in needLocation && pagesBySite[key].orEmpty().all { it.offers.isEmpty() }
+                }
 
                 val matches = matchAll(searches, driver)
-                val used = sites.filter { it !in needLogin && it !in noResults }
+                val used = sites.filter { it !in needLogin && it !in needLocation && it !in noResults }
                 val result = BasketResult.from(searches, matches, used)
                 val warnings = used.mapNotNull(driver::warning)
                 val reused = items.size - toSearch.size
@@ -202,7 +207,10 @@ class ShoppingSession(
                     else -> "Searched again only for ${toSearch.joinToString { it.name }}; the other $reused reused earlier results."
                 }
                 add {
-                    ChatEntry.ResultCard(it, result, needLogin.map(driver::siteName), noResults.map(driver::siteName), warnings, reusedNote)
+                    ChatEntry.ResultCard(
+                        it, result, needLogin.map(driver::siteName), noResults.map(driver::siteName),
+                        needLocation.map(driver::siteName), warnings, reusedNote
+                    )
                 }
                 hasResults = true
             } catch (e: CancellationException) {
@@ -227,51 +235,34 @@ class ShoppingSession(
     fun fillCarts(driver: PaneDriver, result: BasketResult, siteKeys: List<String>) {
         if (work != ShoppingWork.Idle || siteKeys.isEmpty()) return
         job = scope.launch {
-            val carts = mutableListOf<SiteCart>()
+            // Each site works in its own pane, so all of them fill at the same time.
+            val progress = LinkedHashMap<String, String>()
+            fun show(site: String, step: String) {
+                progress[driver.siteName(site)] = step
+                work = ShoppingWork.Carting(
+                    siteName = "",
+                    step = progress.entries.joinToString("\n") { (n, st) -> "$n: $st" },
+                    number = progress.values.count { it == DONE_STEP },
+                    total = progress.size
+                )
+            }
+            val carts = java.util.Collections.synchronizedList(mutableListOf<SiteCart>())
             try {
-                for (site in siteKeys) {
-                    val name = driver.siteName(site)
+                val jobs = siteKeys.mapNotNull { site ->
                     val options = result.items.mapNotNull { plan ->
                         plan.options.firstOrNull { it.providerKey == site }?.let { plan.item to it }
                     }
-                    if (options.isEmpty()) continue
-                    work = ShoppingWork.Carting(name, "checking the cart", 0, options.size)
-                    val itemsBefore = driver.cartCount(site)
-                    val added = mutableListOf<AddedItem>()
-                    for ((i, pair) in options.withIndex()) {
-                        val (item, option) = pair
-                        work = ShoppingWork.Carting(name, "adding ${item.name}", i + 1, options.size)
-                        val result1 = addToCart(driver, site, item, option)
-                        added += result1
-                        // A site that wants a login won't take the rest either.
-                        if (result1.problem == LOGIN_PROBLEM) {
-                            options.drop(i + 1).forEach { (it2, o2) -> added += AddedItem(it2, o2.offer, o2.packs, 0, 0, LOGIN_PROBLEM) }
-                            break
-                        }
-                    }
-                    val anyAdded = added.any { it.inCart > 0 }
-                    val bill = if (anyAdded || (itemsBefore ?: 0) > 0) {
-                        work = ShoppingWork.Carting(name, "reading the bill", options.size, options.size)
-                        readBill(driver, site)
-                    } else null
-                    carts += SiteCart(
-                        providerKey = site,
-                        items = added,
-                        bill = bill,
-                        itemsBefore = itemsBefore,
-                        problem = when {
-                            added.all { it.problem == LOGIN_PROBLEM } -> "$name wants you to log in before it lets you add to its cart."
-                            !anyAdded -> "Nothing could be added to $name's cart."
-                            bill == null -> "Couldn't read the bill on $name's cart page."
-                            else -> null
-                        }
-                    )
-                    // A new cart can change which address or fees apply; search afresh next time.
-                    forgetSite(site)
+                    if (options.isEmpty()) return@mapNotNull null
+                    show(site, "waiting")
+                    async { fillOne(driver, site, options) { step -> show(site, step) }.also { carts += it } }
                 }
-                add { ChatEntry.CartCard(it, CartComparison(carts, result)) }
+                jobs.awaitAll()
+                // Same order as the sites were listed, whichever finished first.
+                val ordered = siteKeys.mapNotNull { k -> carts.firstOrNull { it.providerKey == k } }
+                add { ChatEntry.CartCard(it, CartComparison(ordered, result)) }
             } catch (e: CancellationException) {
-                if (carts.isNotEmpty()) add { ChatEntry.CartCard(it, CartComparison(carts, result)) }
+                val done = carts.toList()
+                if (done.isNotEmpty()) add { ChatEntry.CartCard(it, CartComparison(done, result)) }
                 add { ChatEntry.FromAssistant(it, "Stopped. Items already added stay in those carts.") }
                 throw e
             } catch (e: Exception) {
@@ -280,6 +271,54 @@ class ShoppingSession(
                 work = ShoppingWork.Idle
             }
         }
+    }
+
+    /** Fills one site's cart and reads its bill, reporting each step through [show]. */
+    private suspend fun fillOne(
+        driver: PaneDriver,
+        site: String,
+        options: List<Pair<WantedItem, ItemOption>>,
+        show: (String) -> Unit
+    ): SiteCart {
+        val name = driver.siteName(site)
+        show("checking the cart")
+        val itemsBefore = driver.cartCount(site)
+        val added = mutableListOf<AddedItem>()
+        for ((i, pair) in options.withIndex()) {
+            val (item, option) = pair
+            show("adding ${item.name} (${i + 1} of ${options.size})")
+            val one = addToCart(driver, site, item, option)
+            added += one
+            // A site that wants a login or an address won't take the rest either.
+            if (one.problem == LOGIN_PROBLEM || one.problem == LOCATION_PROBLEM) {
+                options.drop(i + 1).forEach { (it2, o2) -> added += AddedItem(it2, o2.offer, o2.packs, 0, 0, one.problem) }
+                break
+            }
+        }
+        val anyAdded = added.any { it.inCart > 0 }
+        val read = if (anyAdded || (itemsBefore ?: 0) > 0) {
+            show("reading the bill")
+            readBill(driver, site)
+        } else null
+        val bill = read?.bill
+        val emptied = read?.empty == true
+        // A new cart can change which address or fees apply; search afresh next time.
+        forgetSite(site)
+        show(DONE_STEP)
+        return SiteCart(
+            providerKey = site,
+            items = added,
+            bill = bill,
+            itemsBefore = itemsBefore,
+            problem = when {
+                added.all { it.problem == LOGIN_PROBLEM } -> "$name wants you to log in before it lets you add to its cart."
+                added.all { it.problem == LOCATION_PROBLEM } -> "$name wants a delivery address first. Set it with Set up in Your sites."
+                !anyAdded -> "Nothing could be added to $name's cart."
+                emptied -> "$name's cart came up empty: as a guest it can drop items when it asks you to log in. Log in on $name to use its cart."
+                bill == null -> "Couldn't read the bill on $name's cart page."
+                else -> null
+            }
+        )
     }
 
     /** Takes out only what the app put in a site's cart; anything the shopper had stays. */
@@ -323,6 +362,7 @@ class ShoppingSession(
     private suspend fun addToCart(driver: PaneDriver, site: String, item: WantedItem, option: ItemOption): AddedItem {
         val page = searchSite(driver, site, item.search)
         if (page?.needsLogin == true) return AddedItem(item, option.offer, option.packs, 0, 0, LOGIN_PROBLEM)
+        if (page?.needsLocation == true) return AddedItem(item, option.offer, option.packs, 0, 0, LOCATION_PROBLEM)
         // Results can still be rendering; look once more before giving up.
         val first = cardAction(driver, site, option.offer, "find")?.takeIf { it.found }
             ?: run {
@@ -344,6 +384,13 @@ class ShoppingSession(
             delay(STEP_DELAY_MS)
             choosePack(driver, site, option.offer)
             state = cardAction(driver, site, option.offer, "find") ?: state
+            // Some sites (Flipkart Minutes) show the new count a few seconds late, especially while
+            // other panes are busy too: look again before calling it a failure.
+            var checks = 0
+            while (state.count == 0 && checks++ < LATE_COUNT_CHECKS) {
+                delay(STEP_DELAY_MS)
+                state = cardAction(driver, site, option.offer, "find") ?: state
+            }
             if (state.count == 0) {
                 if (debugLog) Log.d(TAG, "$site cart: ${option.offer.name} ADD pressed but count stayed 0")
                 return AddedItem(item, option.offer, option.packs, 0, 0, "The site didn't add it. It may want you to log in.")
@@ -397,17 +444,28 @@ class ShoppingSession(
         return true
     }
 
+    /** A cart page's bill, or that the page said the cart is empty. */
+    private class BillRead(val bill: Bill?, val empty: Boolean)
+
     /** Opens the cart and reads its bill, giving the page a few seconds to fill it in. */
-    private suspend fun readBill(driver: PaneDriver, site: String): Bill? {
+    private suspend fun readBill(driver: PaneDriver, site: String): BillRead? {
         if (!openCart(driver, site)) return null
+        var emptyReads = 0
         repeat(MAX_READS) {
             delay(READ_INTERVAL_MS)
             val view = driver.view(site) ?: return null
             val raw = runPageScript(view, scripts.load(BILL_SCRIPT)) ?: return@repeat
-            val bill = runCatching { BillParser.parse(JSONObject(raw)) }.getOrNull()
+            val json = runCatching { JSONObject(raw) }.getOrNull() ?: return@repeat
+            // Some cart pages show "empty" for a moment while loading; twice in a row is real.
+            if (json.optBoolean("empty")) {
+                if (++emptyReads >= 2) return BillRead(null, empty = true)
+                return@repeat
+            }
+            emptyReads = 0
+            val bill = runCatching { BillParser.parse(json) }.getOrNull()
             if (bill != null) {
                 if (debugLog) Log.d(TAG, "$site bill: $raw")
-                return bill
+                return BillRead(bill, empty = false)
             }
         }
         return null
@@ -488,7 +546,7 @@ class ShoppingSession(
     }
 
     private fun settled(a: PageOffers, b: PageOffers): Boolean =
-        a.needsLogin && b.needsLogin ||
+        a.needsLogin && b.needsLogin || a.needsLocation && b.needsLocation ||
             a.offers.isNotEmpty() && a.offers.size == b.offers.size &&
             a.offers.take(3).map { it.name } == b.offers.take(3).map { it.name }
 
@@ -514,8 +572,11 @@ class ShoppingSession(
         private const val LOGIN_RETRY_DELAY_MS = 2_500L
         /** Time for a site to update after a tap on ADD, + or -. */
         private const val STEP_DELAY_MS = 1_500L
+        private const val DONE_STEP = "done"
+        private const val LATE_COUNT_CHECKS = 3
         private const val CART_SCRIPT = "cart_actions.js"
         private const val LOGIN_PROBLEM = "The site asked you to log in."
+        private const val LOCATION_PROBLEM = "The site asked for a delivery address."
         private const val BILL_SCRIPT = "bill_reader.js"
         /** Prices on quick-commerce sites change often; older results are searched again. */
         private const val CACHE_MS = 20 * 60 * 1000L

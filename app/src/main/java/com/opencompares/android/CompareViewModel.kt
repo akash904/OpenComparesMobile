@@ -35,7 +35,9 @@ import com.opencompares.android.sites.FAR_AWAY_KM
 import com.opencompares.android.sites.LocationState
 import com.opencompares.android.sites.LoginState
 import com.opencompares.android.sites.SiteStatus
+import com.opencompares.android.sites.SiteStatusMemory
 import com.opencompares.android.sites.SiteStatusReader
+import com.opencompares.android.sites.over
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -194,6 +196,7 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
     // Site setup: login and delivery location on each marketplace
 
     private val statusReader = SiteStatusReader(application)
+    private val statusMemory = SiteStatusMemory(application)
 
     /** What each pane last said about login and delivery location. */
     val siteStatus = mutableStateMapOf<String, SiteStatus>()
@@ -221,9 +224,10 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
     fun refreshStatus(key: String, store: PaneWebViewStore) {
         val view = store.view(key) ?: return
         viewModelScope.launch {
-            val now = statusReader.read(view) ?: return@launch
-            val before = siteStatus[key]
+            val before = siteStatus[key] ?: statusMemory.load(key)
+            val now = statusReader.read(view)?.over(before) ?: return@launch
             siteStatus[key] = now
+            statusMemory.save(key, now)
             // New login or address: prices may differ, so don't reuse this site's saved results.
             if (before != null && (before.login != now.login || before.location != now.location || before.label != now.label)) {
                 shopping.forgetSite(key)
@@ -358,7 +362,7 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
         override fun cartUrl(key: String) = providers.firstOrNull { it.key == key }?.cartUrl
 
         override suspend fun cartCount(key: String): Int? =
-            statusReader.read(store.view(key))?.also { siteStatus[key] = it }?.cartCount
+            statusReader.read(store.view(key))?.over(siteStatus[key])?.also { siteStatus[key] = it }?.cartCount
 
         override fun siteName(key: String) = providers.firstOrNull { it.key == key }?.displayName ?: key
 

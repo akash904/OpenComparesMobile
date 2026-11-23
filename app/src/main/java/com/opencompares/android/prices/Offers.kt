@@ -14,6 +14,12 @@ data class Quantity(val amount: Double, val unit: BaseUnit) {
     }
 
     companion object {
+        // "450-550g", "1.95-2.05Kg": a range of the same unit.
+        private val RANGE = Regex(
+            """(\d+(?:\.\d+)?)\s?(?:-|–|to)\s?(\d+(?:\.\d+)?)\s?(g|gm|gms|grams?|kg|kgs|ml|l|ltr|litres?|liters?)\b""",
+            RegexOption.IGNORE_CASE
+        )
+
         private val PATTERN = Regex(
             """(\d+(?:\.\d+)?)\s?(?:(?:x|×)\s?(\d+(?:\.\d+)?)\s?)?(g|gm|gms|grams?|kg|kgs|ml|l|ltr|litres?|liters?|pc|pcs|pieces?|pack|units?|dozen|tabs?|tablets?|caps?|sachets?)\b(?:\s?(?:x|×)\s?(\d+))?""",
             RegexOption.IGNORE_CASE
@@ -25,6 +31,12 @@ data class Quantity(val amount: Double, val unit: BaseUnit) {
          */
         fun parse(text: String?): Quantity? {
             if (text.isNullOrBlank()) return null
+            // A weight range is sold by its middle: "450-550g" is about 500 g.
+            RANGE.find(text)?.let { r ->
+                val low = r.groupValues[1].toDouble()
+                val high = r.groupValues[2].toDouble()
+                Quantity.parse("${trim((low + high) / 2)} ${r.groupValues[3]}")?.let { return it }
+            }
             // "1 pack (500 ml)": a weight or volume says more than a pack or piece count,
             // and "1 pack (6 pcs)": a piece count says more than "pack".
             val matches = PATTERN.findAll(text).toList()
@@ -108,7 +120,9 @@ data class PageOffers(
     val scannedPrices: Int,
     /** The page shows no prices but asks the user to log in. */
     val needsLogin: Boolean,
-    val readAtMillis: Long
+    val readAtMillis: Long,
+    /** The page wants a delivery address before it shows products. */
+    val needsLocation: Boolean = false
 )
 
 /** Reads a rupee amount from text like "₹1,299", "Rs. 45.50" or "INR 99". */
@@ -159,6 +173,7 @@ object OfferParser {
             offers = offers.distinctBy { it.name.lowercase(Locale.ROOT) to it.price },
             scannedPrices = json.optInt("scannedPrices", 0),
             needsLogin = json.optBoolean("needsLogin", false),
+            needsLocation = json.optBoolean("needsLocation", false),
             readAtMillis = nowMillis
         )
     }

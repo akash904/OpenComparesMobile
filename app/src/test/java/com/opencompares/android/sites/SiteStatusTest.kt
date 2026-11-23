@@ -43,6 +43,18 @@ class SiteStatusTest {
     }
 
     @Test
+    fun aPageThatShowsNeitherKeepsWhatWasKnown() {
+        // Amazon Now's home page shows the login and address; its cart page shows neither.
+        val home = SiteStatus(LoginState.In, LocationState.Set, "New Delhi 110070", null, null, false)
+        val cartPage = SiteStatus(LoginState.Unknown, LocationState.Unknown, null, null, null, false)
+        assertEquals(home.copy(cartCount = null), cartPage.over(home))
+        // A page that does say something new wins.
+        val loggedOut = cartPage.copy(login = LoginState.Out)
+        assertEquals(LoginState.Out, loggedOut.over(home).login)
+        assertEquals("New Delhi 110070", loggedOut.over(home).label)
+    }
+
+    @Test
     fun deliveryPlaceSurvivesSaving() {
         val place = DeliveryPlace("Vasant Kunj, New Delhi, 110070", 28.5095867, 77.1665878)
         assertEquals(place, DeliveryPlace.decode(place.encode()))

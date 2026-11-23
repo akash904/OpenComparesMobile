@@ -24,7 +24,8 @@ data class BillLine(val label: String, val amount: Double) {
         }
 
     private companion object {
-        val ITEMS_RE = Regex("""^(items? total|item total|sub ?total|mrp total|items? price|cart total)""")
+        // Flipkart's is "Price (1 item)".
+        val ITEMS_RE = Regex("""^(items? total|item total|sub ?total|mrp total|items? price|cart total|price \(\d+ items?\))""")
         val DISCOUNT_RE = Regex("""discount|saving|coupon|offer|cashback|promo""")
     }
 }
@@ -36,8 +37,14 @@ data class Bill(val lines: List<BillLine>, val toPay: Double, val freeDeliveryAb
     /** Everything that isn't the items: fees, minus discounts. */
     val charges: List<BillLine> get() = lines.filter { it.kind != ChargeKind.Items }
 
-    /** What the order costs on top of the items. */
-    val extra: Double? get() = itemTotal?.let { toPay - it }
+    /** Discounts on the bill (negative amounts), e.g. Flipkart's "Discount -₹28" off list prices. */
+    val discounts: Double get() = lines.filter { it.kind == ChargeKind.Discount }.sumOf { it.amount }
+
+    /**
+     * What the order costs on top of the items at their selling price: delivery, handling and
+     * other fees. Discounts lower the items' price; they are not taken off the charges.
+     */
+    val extra: Double? get() = itemTotal?.let { toPay - (it + discounts) }
 }
 
 object BillParser {

@@ -113,11 +113,14 @@
       var el = node.parentElement;
       // Zepto keeps a hidden "0" stepper behind its ADD button; only a visible count is real.
       if (!/^\d{1,2}$/.test(t) || t === "0" || !el || el.getBoundingClientRect().width === 0) continue;
-      // Icons on either side of a bare number (Blinkit's cart page).
-      var before = siblingElement(node, false);
-      var after = siblingElement(node, true);
-      if (smallControl(before) && smallControl(after)) {
-        return { count: parseInt(t, 10), plus: inc ? clickable(inc) : after, minus: dec ? clickable(dec) : before };
+      // Icons on either side of the number, or of a wrapper around it (Blinkit's cart page,
+      // Flipkart): [icon] 1 [icon].
+      for (var at = node, lvl = 0; at && lvl < 3; at = lvl === 0 ? el : at.parentElement, lvl++) {
+        var before = siblingElement(at, false);
+        var after = siblingElement(at, true);
+        if (smallControl(before) && smallControl(after)) {
+          return { count: parseInt(t, 10), plus: inc ? clickable(inc) : after, minus: dec ? clickable(dec) : before };
+        }
       }
       // A count element between two buttons, possibly inside wrappers.
       var box = el.parentElement;
@@ -151,6 +154,19 @@
     return seen.length;
   }
 
+  // An element with two or more children that each have their own ADD button or stepper is a
+  // list of products, never one product's card; climbing past it would borrow a neighbour's
+  // button. (A card's own price block and ADD button are separate children, so prices alone
+  // can't tell a card from a list.)
+  function isList(el) {
+    var n = 0;
+    for (var c = el.firstElementChild; c; c = c.nextElementSibling) {
+      if (hasControl(c)) n++;
+      if (n >= 2) return true;
+    }
+    return false;
+  }
+
   function hasControl(el) {
     return !!(addButton(el) || stepper(el));
   }
@@ -169,6 +185,7 @@
       var text = el.innerText || el.textContent;
       if (norm(text) !== want && !(loose && wantShort && stripped(text) === wantShort)) continue;
       for (var a = el.parentElement, depth = 0; a && a !== document.body && depth < 10; a = a.parentElement, depth++) {
+        if (isList(a)) break;
         if (hasControl(a)) {
           if (cards.indexOf(a) < 0) cards.push(a);
           break;
@@ -231,7 +248,7 @@
     // The price can sit just outside the part holding the name and button (Instamart):
     // look a little higher, while still inside this one product's card.
     for (var c = cards[i], up = 0; c && c !== document.body && up < 6; c = c.parentElement, up++) {
-      if (up > 0 && controlCount(c) > 1) break;
+      if (up > 0 && (controlCount(c) > 1 || isList(c))) break;
       if (priceIn(c)) { card = c; break; }
     }
   }

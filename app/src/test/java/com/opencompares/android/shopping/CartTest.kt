@@ -34,6 +34,25 @@ class CartTest {
     }
 
     @Test
+    fun amazonAndFlipkartBillsParse() {
+        // Read from Amazon Now and Flipkart Minutes on 2026-11-23.
+        val amazon = BillParser.parse(JSONObject("""{"found":true,"rows":[{"label":"Items total","amount":26},
+            {"label":"Handling fee","amount":0},{"label":"Delivery fee","amount":30}],"toPay":56,"freeDeliveryAbove":99}"""))!!
+        assertEquals(26.0, amazon.itemTotal!!, 0.0)
+        assertEquals(30.0, amazon.extra!!, 0.0)
+        assertEquals(99.0, amazon.freeDeliveryAbove!!, 0.0)
+
+        val flipkart = BillParser.parse(JSONObject("""{"found":true,"rows":[{"label":"Price (1 item)","amount":102},
+            {"label":"Discount","amount":-44},{"label":"Handling fee","amount":30}],"toPay":88,"freeDeliveryAbove":null}"""))!!
+        assertEquals(ChargeKind.Items, flipkart.lines[0].kind)
+        assertEquals(ChargeKind.Discount, flipkart.lines[1].kind)
+        assertEquals(88.0, flipkart.toPay, 0.0)
+        // ₹102 list price less ₹44 off is ₹58 of items; the ₹30 handling fee is the charge, not ₹-14.
+        assertEquals(-44.0, flipkart.discounts, 0.0)
+        assertEquals(30.0, flipkart.extra!!, 0.0)
+    }
+
+    @Test
     fun noBillOnThePageIsNull() {
         assertNull(BillParser.parse(JSONObject("""{"found":false,"rows":[],"toPay":null}""")))
     }

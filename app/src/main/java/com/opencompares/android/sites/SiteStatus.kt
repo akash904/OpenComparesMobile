@@ -70,6 +70,43 @@ data class SiteStatus(
     }
 }
 
+/**
+ * This reading, with anything it couldn't tell filled in from [known]: a site's search or
+ * cart page often shows neither the login nor the address (Amazon Now shows them only on
+ * its home page), and that is no reason to forget them.
+ */
+fun SiteStatus.over(known: SiteStatus?): SiteStatus {
+    if (known == null) return this
+    val keepPlace = location == LocationState.Unknown
+    return copy(
+        login = if (login == LoginState.Unknown) known.login else login,
+        location = if (keepPlace) known.location else location,
+        label = if (keepPlace) known.label else label,
+        lat = if (keepPlace) known.lat else lat,
+        lon = if (keepPlace) known.lon else lon
+    )
+}
+
+/** Remembers each site's last known login and address across app restarts, on the phone only. */
+class SiteStatusMemory(context: Context) {
+    private val prefs = context.applicationContext.getSharedPreferences("site_status", Context.MODE_PRIVATE)
+
+    fun load(key: String): SiteStatus? {
+        val raw = prefs.getString(key, null) ?: return null
+        return runCatching { SiteStatus.parse(JSONObject(raw)) }.getOrNull()
+    }
+
+    fun save(key: String, s: SiteStatus) {
+        val json = JSONObject()
+            .put("login", when (s.login) { LoginState.In -> "in"; LoginState.Out -> "out"; else -> "unknown" })
+            .put("location", s.location.name.lowercase())
+            .put("label", s.label ?: JSONObject.NULL)
+            .put("lat", s.lat ?: JSONObject.NULL)
+            .put("lon", s.lon ?: JSONObject.NULL)
+        prefs.edit().putString(key, json.toString()).apply()
+    }
+}
+
 /** Distance between two points on Earth, in kilometres. */
 fun distanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
     val r = 6371.0

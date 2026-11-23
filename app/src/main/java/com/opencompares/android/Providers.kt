@@ -117,14 +117,16 @@ val MVP_PROVIDERS = listOf(
         displayName = "Amazon Now",
         urlTemplate = "https://www.amazon.in/tez/browse/search?searchKeyword={QUERY}",
         homeUrl = "https://www.amazon.in/tez/browse",
-        defaultZoom = 70
+        defaultZoom = 70,
+        cartUrl = "https://www.amazon.in/tez/browse/cart"
     ),
     Provider(
         key = "flipkart_minutes",
         displayName = "Flipkart Minutes",
         urlTemplate = "https://www.flipkart.com/search?q={QUERY}&otracker=search&otracker1=search&marketplace=HYPERLOCAL",
         homeUrl = "https://www.flipkart.com/flipkart-minutes-store?marketplace=HYPERLOCAL",
-        defaultZoom = 70
+        defaultZoom = 70,
+        cartUrl = "https://www.flipkart.com/viewcart?marketplace=HYPERLOCAL"
     ),
     Provider(
         key = "jiomart",

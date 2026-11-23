@@ -261,7 +261,11 @@ private fun WorkRow(work: ShoppingWork, onStop: () -> Unit) {
         ShoppingWork.Thinking -> "Reading your list…"
         is ShoppingWork.Searching -> "Searching every site for ${work.itemName} (${work.number} of ${work.total})…"
         ShoppingWork.Matching -> "ChatGPT is matching products across sites…"
-        is ShoppingWork.Carting -> "${work.siteName}: ${work.step}" + if (work.number > 0) " (${work.number} of ${work.total})…" else "…"
+        is ShoppingWork.Carting -> if (work.siteName.isEmpty()) {
+            "Filling carts (${work.number} of ${work.total} done)\n${work.step}"
+        } else {
+            "${work.siteName}: ${work.step}" + if (work.number > 0) " (${work.number} of ${work.total})…" else "…"
+        }
         ShoppingWork.Idle -> ""
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -295,6 +299,10 @@ private fun ResultCard(
         if (entry.needLogin.isNotEmpty()) {
             Spacer(Modifier.height(6.dp))
             Hint("${entry.needLogin.joinToString()} asked you to log in, so it was left out. Log in in its pane and search again.")
+        }
+        if (entry.needLocation.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            Hint("${entry.needLocation.joinToString()} asked for a delivery address, so it was left out. Use Set up in Your sites, then search again.")
         }
         if (entry.noResults.isNotEmpty()) {
             Spacer(Modifier.height(6.dp))
