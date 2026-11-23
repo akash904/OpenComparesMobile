@@ -33,9 +33,11 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.LocalOffer
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Store
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -48,6 +50,7 @@ import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -167,6 +170,26 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
     var showPrices by rememberSaveable { mutableStateOf(false) }
     // The app opens on the shopping chat; the sites are one tap away underneath it.
     var showChat by rememberSaveable { mutableStateOf(true) }
+    var confirmReset by remember { mutableStateOf(false) }
+    if (confirmReset) {
+        AlertDialog(
+            onDismissRequest = { confirmReset = false },
+            title = { Text("Start a new chat?") },
+            text = {
+                Text(
+                    "This clears your list and the prices found so far." +
+                        if (viewModel.shopping.filledCarts) " Items the app added to site carts stay there; remove them from the totals card first if you don't want them." else ""
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmReset = false
+                    viewModel.shopping.reset()
+                }) { Text("New chat") }
+            },
+            dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Cancel") } }
+        )
+    }
     // A site opened full screen to log in and set the address, with a checklist under it.
     var setupSite by rememberSaveable { mutableStateOf<String?>(null) }
     val endSetup = {
@@ -215,6 +238,16 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
                 },
                 actions = {
                     CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                        if (showChat && viewModel.shopping.canReset) {
+                            IconButton(onClick = { confirmReset = true }, modifier = Modifier.size(32.dp)) {
+                                Icon(
+                                    Icons.Filled.RestartAlt,
+                                    contentDescription = "New chat",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
                         IconButton(onClick = { showChat = !showChat }, modifier = Modifier.size(32.dp)) {
                             Icon(
                                 if (showChat) Icons.Filled.GridView else Icons.AutoMirrored.Filled.Chat,

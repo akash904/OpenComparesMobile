@@ -228,6 +228,28 @@ class ShoppingSession(
         job?.cancel()
     }
 
+    /** True once the chat has more than the greeting, so there is something to reset. */
+    val canReset: Boolean get() = entries.size > 1 || work != ShoppingWork.Idle
+
+    /** True if the app has put items in any site's cart during this chat. */
+    val filledCarts: Boolean get() = entries.any { it is ChatEntry.CartCard }
+
+    /**
+     * Starts a new chat: stops whatever is running and clears the list and results.
+     * Recent search results are kept, so searching the same items again is quick.
+     * Items already put in site carts stay there.
+     */
+    fun reset() {
+        job?.cancel()
+        job = null
+        entries.clear()
+        list = emptyList()
+        hasResults = false
+        nextItemId = 1
+        work = ShoppingWork.Idle
+        add { ChatEntry.FromAssistant(it, GREETING) }
+    }
+
     /**
      * Puts each chosen site's items in its cart, then reads the site's real bill. Only the
      * sites the shopper confirmed are touched, one at a time; nothing is ever ordered.
