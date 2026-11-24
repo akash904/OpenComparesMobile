@@ -5,13 +5,15 @@
  * price, and reads or presses its ADD button or quantity stepper. One action per run: the app
  * waits between runs so the site can update. It never goes near checkout or payment.
  *
- * Called with {mode: "find" | "add" | "plus" | "minus" | "variant" | "confirm" | "lines" | "removeOne", name, price}.
+ * Called with {mode: "find" | "add" | "plus" | "minus" | "variant" | "confirm" | "lines" | "removeOne", name, price, force}.
+ * force presses even when the card doesn't look live yet, after the app has waited long enough.
  * "lines" and "removeOne" work on a cart page without a name: they count every line's items,
  * or take one item out of the first line, returning {lines, units, pressed}.
  * "variant" and "confirm" work in a pack-size picker some sites open after ADD (Instamart):
  * the first adds the row with the right price, the second closes the picker with Confirm. An empty price matches
  * any price, for cart pages that show line totals.
- * Returns: JSON string {found, count, canAdd, canPlus, outOfStock, cardText}
+ * Returns: JSON string {found, live, count, canAdd, canPlus, outOfStock, cardText}; live is false
+ * while the card's buttons don't work yet, and then nothing is pressed.
  */
 (function (args) {
   var ADD_RE = /^(?:add|add to cart|add to bag|\+ ?add|add ?\+)$/i;
@@ -34,6 +36,49 @@
   // and following one opens the product page instead of adding it.
   function clickable(el) {
     return (el.closest && el.closest("button, [role=button]")) || el;
+  }
+
+  // Presses a control. A control inside a card that is a link (Flipkart) would also follow the
+  // link and open the product page, so the link is told to stay put for this one click.
+  function press(el) {
+    var link = el.closest && el.closest("a[href]");
+    function stay(e) { e.preventDefault(); }
+    // A plain box, not a button (Flipkart's "Add" on items with options), may only take a press
+    // that starts with the finger going down; a click alone reaches the card and opens it.
+    if (!el.closest("button, [role=button]")) {
+      var r = el.getBoundingClientRect();
+      var at = { bubbles: true, cancelable: true, composed: true, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+        pointerId: 1, pointerType: "touch", isPrimary: true, button: 0, buttons: 1 };
+      el.dispatchEvent(new PointerEvent("pointerdown", at));
+      at.buttons = 0;
+      el.dispatchEvent(new PointerEvent("pointerup", at));
+    }
+    if (link) link.addEventListener("click", stay);
+    try {
+      el.click();
+    } finally {
+      if (link) link.removeEventListener("click", stay);
+    }
+  }
+
+  // React sites (Flipkart) draw their cards a second or two before the buttons work, and a press
+  // in between falls through to the card's link. A control is live once the page has finished
+  // loading and, on a React page, React has attached to it or a box around it.
+  function hasReactKey(el, prefix) {
+    for (var k in el) if (k.indexOf(prefix) === 0) return true;
+    return false;
+  }
+  function live(el) {
+    if (!el || args.force) return true;
+    if (document.readyState !== "complete") return false;
+    var tops = document.querySelectorAll("body, body > *, body > * > *");
+    var react = false;
+    for (var i = 0; i < tops.length && !react; i++) react = hasReactKey(tops[i], "__react");
+    if (!react) return true;
+    for (var e = el; e && e !== document.body; e = e.parentElement) {
+      if (hasReactKey(e, "__reactProps")) return true;
+    }
+    return false;
   }
 
   function visibleText(el) {
@@ -125,12 +170,18 @@
       // Zepto keeps a hidden "0" stepper behind its ADD button; only a visible count is real.
       if (!/^\d{1,2}$/.test(t) || t === "0" || !el || el.getBoundingClientRect().width === 0) continue;
       // Icons on either side of the number, or of a wrapper around it (Blinkit's cart page,
-      // Flipkart): [icon] 1 [icon].
-      for (var at = node, lvl = 0; at && lvl < 3; at = lvl === 0 ? el : at.parentElement, lvl++) {
+      // Flipkart, whose number sits three wrappers deep): [icon] 1 [icon].
+      for (var at = node, lvl = 0; at && lvl < 4; at = lvl === 0 ? el : at.parentElement, lvl++) {
         var before = siblingElement(at, false);
         var after = siblingElement(at, true);
         if (smallControl(before) && smallControl(after)) {
-          return { count: parseInt(t, 10), plus: inc ? clickable(inc) : after, minus: dec ? clickable(dec) : before };
+          // − is the one on the left as drawn: Flipkart puts + first in the page and flips the row.
+          var flipped = before.getBoundingClientRect().left > after.getBoundingClientRect().left;
+          return {
+            count: parseInt(t, 10),
+            plus: inc ? clickable(inc) : (flipped ? before : after),
+            minus: dec ? clickable(dec) : (flipped ? after : before)
+          };
         }
       }
       // A count element between two buttons, possibly inside wrappers.
@@ -216,7 +267,30 @@
     for (var d = dialogs.length - 1; d >= 0; d--) {
       if (dialogs[d].getBoundingClientRect().height > 0 && hasControl(dialogs[d])) return dialogs[d];
     }
+    // Flipkart's options sheet is a plain full-screen overlay: a fixed box over the whole
+    // page with its own ADD buttons and prices.
+    var boxes = document.body.querySelectorAll("div");
+    for (var f = 0; f < boxes.length; f++) {
+      var r = boxes[f].getBoundingClientRect();
+      if (r.height < window.innerHeight * 0.9 || getComputedStyle(boxes[f]).position !== "fixed") continue;
+      if (/₹\s*\d/.test(boxes[f].innerText || "") && addButton(boxes[f])) return boxes[f];
+    }
     return null;
+  }
+
+  // A picker that is a proper dialog (Instamart), not a plain overlay sheet (Flipkart).
+  function isDialog(picker) {
+    return picker.matches("[role=dialog], dialog");
+  }
+
+  // ADD buttons in a picker: real buttons, and in an overlay sheet the innermost elements reading "ADD".
+  function pickerAdds(picker) {
+    var sheet = !isDialog(picker);
+    return Array.prototype.slice.call(picker.querySelectorAll("button, [role=button], div, span")).filter(function (b) {
+      var t = visibleText(b);
+      if (isButton(b)) return ADD_RE.test(t) || /^add$/i.test(b.getAttribute("aria-label") || "");
+      return sheet && t.length <= 14 && ADD_RE.test(t) && !b.querySelector("div, span") && !isButton(clickable(b));
+    }).map(clickable);
   }
 
   if (args.mode === "variant" || args.mode === "confirm") {
@@ -229,21 +303,50 @@
       }).pop();
       if (done) done = clickable(done);
       if (done) done.click();
+      // A sheet without a confirm button (Flipkart) has taken the pack already: tapping the
+      // dimmed backdrop above the sheet closes it.
+      else if (!isDialog(picker)) {
+        var x = window.innerWidth / 2, y = window.innerHeight * 0.15;
+        var backdrop = document.elementFromPoint(x, y);
+        if (backdrop && picker.contains(backdrop)) {
+          var at = { bubbles: true, cancelable: true, clientX: x, clientY: y, pointerId: 1, pointerType: "touch", isPrimary: true, buttons: 1 };
+          backdrop.dispatchEvent(new PointerEvent("pointerdown", at));
+          at.buttons = 0;
+          backdrop.dispatchEvent(new PointerEvent("pointerup", at));
+          backdrop.click();
+        }
+      }
       return JSON.stringify({ found: !!done, picker: true });
     }
     // The row for this pack: start from each main ADD button and climb to the nearest box
     // that shows this price, as long as it holds no other main ADD button.
-    var mains = Array.prototype.slice.call(picker.querySelectorAll("button, [role=button]")).filter(function (b) {
-      return ADD_RE.test(visibleText(b)) || /^add$/i.test(b.getAttribute("aria-label") || "");
-    });
+    var mains = pickerAdds(picker);
+    function rowText(a) {
+      return ((a.getAttribute("aria-label") || "") + " " + (a.innerText || "")).replace(/,/g, "");
+    }
     for (var m = 0; m < mains.length; m++) {
       for (var a = mains[m].parentElement, depth = 0; a && a !== picker && depth < 8; a = a.parentElement, depth++) {
         var others = mains.filter(function (x) { return x !== mains[m] && a.contains(x); }).length;
-        if (others > 0) break;
-        var text = ((a.getAttribute("aria-label") || "") + " " + (a.innerText || "")).replace(/,/g, "");
-        if (!priceRe || priceRe.test(text)) {
-          mains[m].click();
+        // A box with another row's ADD, or in a sheet another row's count, is past this row.
+        if (others > 0 || (!isDialog(picker) && stepper(a))) break;
+        if (!priceRe || priceRe.test(rowText(a))) {
+          press(mains[m]);
           return JSON.stringify({ found: true, picker: true });
+        }
+      }
+    }
+    // The pack is already in the cart (Flipkart shows its count in the sheet): press its +.
+    if (priceRe && !isDialog(picker)) {
+      var pw = document.createTreeWalker(picker, NodeFilter.SHOW_TEXT);
+      while (pw.nextNode()) {
+        if (!priceRe.test(pw.currentNode.textContent.replace(/,/g, ""))) continue;
+        for (var r = pw.currentNode.parentElement, up2 = 0; r && r !== picker && up2 < 6; r = r.parentElement, up2++) {
+          if (mains.some(function (x) { return r.contains(x); })) break;
+          var rs = stepper(r);
+          if (rs && rs.plus) {
+            press(rs.plus);
+            return JSON.stringify({ found: true, picker: true });
+          }
         }
       }
     }
@@ -317,7 +420,7 @@
     var units = steps.reduce(function (n, s) { return n + s.count; }, 0);
     var pressed = false;
     if (args.mode === "removeOne" && steps.length) {
-      steps[0].minus.click();
+      press(steps[0].minus);
       pressed = true;
     }
     return JSON.stringify({ lines: steps.length, units: units, pressed: pressed });
@@ -344,12 +447,20 @@
   var add = step ? null : addButton(card);
   var count = step ? step.count : 0;
 
-  if (args.mode === "add" && add) add.click();
-  else if (args.mode === "plus" && step && step.plus) step.plus.click();
-  else if (args.mode === "minus" && step && step.minus) step.minus.click();
+  // A list can be drawn again just after it appears (Flipkart), replacing every card: only press
+  // a card that an earlier run saw too, so it isn't about to be thrown away.
+  var seen = card.hasAttribute("data-oc-seen");
+  card.setAttribute("data-oc-seen", "1");
+  var ready = args.force || (seen && live(add || (step && (step.plus || step.minus))));
+  if (ready) {
+    if (args.mode === "add" && add) press(add);
+    else if (args.mode === "plus" && step && step.plus) press(step.plus);
+    else if (args.mode === "minus" && step && step.minus) press(step.minus);
+  }
 
   return JSON.stringify({
     found: true,
+    live: ready,
     count: count,
     canAdd: !!add,
     canPlus: !!(step && step.plus),

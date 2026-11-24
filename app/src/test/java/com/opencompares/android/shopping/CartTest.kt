@@ -149,4 +149,53 @@ class CartTest {
         assertFalse(short.complete)
         assertEquals(1, short.items[0].addedByApp)
     }
+
+    @Test
+    fun aCartWithOtherItemsIsNotCompared() {
+        val milk = WantedItem("Milk", "milk", "1 l", 1, id = 1)
+        val bMilk = offer("Milk", 60.0, "1 l")
+        val zMilk = offer("Milk", 56.0, "1 l")
+        val searches = listOf(ItemSearch(milk, listOf(page("blinkit", bMilk), page("zepto", zMilk))))
+        val p = MatchPrompts.build(searches) { it }
+        val result = BasketResult.from(searches, MatchParser.parse("""{"items":[{"item":1,"ids":["1a1","1b1"]}]}""", p), listOf("blinkit", "zepto"))
+        // Zepto's bill is lower, but its cart holds 3 items that aren't on the list.
+        val blinkit = SiteCart("blinkit", listOf(added(milk, bMilk)), Bill(emptyList(), 95.0, null), 0, null)
+        val zepto = SiteCart("zepto", listOf(added(milk, zMilk)), Bill(emptyList(), 90.0, null), 3, null)
+        val c = CartComparison(listOf(blinkit, zepto), result)
+        assertEquals(3, zepto.otherItems)
+        assertEquals(listOf(zepto), c.mixed)
+        assertEquals("blinkit", c.best!!.providerKey)
+
+        // Units of a listed product that were already there aren't "other" items.
+        val again = SiteCart("zepto", listOf(AddedItem(milk, zMilk, 2, before = 1, inCart = 2, problem = null)), null, 1, null)
+        assertEquals(0, again.otherItems)
+    }
+
+    @Test
+    fun autoModeTakesOutOnlyWhatLeftTheList() {
+        val milk = WantedItem("Milk", "milk", "1 l", 1, id = 1)
+        val eggs = WantedItem("Eggs", "eggs", "6 pcs", 1, id = 2)
+        val bMilk = offer("Amul Milk", 60.0, "1 l")
+        val bEggs = offer("Farm Eggs", 50.0, "6 pcs")
+        val first = SiteCart("blinkit", listOf(added(milk, bMilk, wanted = 2), added(eggs, bEggs)), null, 0, null)
+        var owned = CartSync.afterFill(emptyList(), listOf(first))
+        assertEquals(listOf(2, 1), owned.map { it.units })
+
+        // Eggs are dropped and only one milk is wanted now.
+        val oneMilk = milk.copy(count = 1)
+        val searches = listOf(ItemSearch(oneMilk, listOf(page("blinkit", bMilk))))
+        val p = MatchPrompts.build(searches) { it }
+        val result = BasketResult.from(searches, MatchParser.parse("""{"items":[{"item":1,"ids":["1a1"]}]}""", p), listOf("blinkit"))
+        val out = CartSync.removals(owned, result)
+        assertEquals(listOf("Amul Milk" to 1, "Farm Eggs" to 1), out.getValue("blinkit").map { it.first.name to it.second })
+
+        owned = CartSync.afterRemoval(owned, "blinkit", "Farm Eggs", 1)
+        owned = CartSync.afterRemoval(owned, "blinkit", "Amul Milk", 1)
+        assertEquals(listOf(1), owned.map { it.units })
+        assertTrue(CartSync.removals(owned, result).isEmpty())
+
+        // A second fill that adds one more on top counts toward the same listing.
+        val second = SiteCart("blinkit", listOf(AddedItem(oneMilk, bMilk, 2, before = 1, inCart = 2, problem = null)), null, 1, null)
+        assertEquals(listOf(2), CartSync.afterFill(owned, listOf(second)).map { it.units })
+    }
 }

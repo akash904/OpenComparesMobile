@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.SharedPreferencesMigration
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
@@ -44,7 +45,11 @@ data class AppSettings(
     /** Sites the shopper chose to use without logging in. */
     val skippedLogin: Set<String> = emptySet(),
     /** Sites the shopper chose to use with the site's own idea of their area. */
-    val skippedLocation: Set<String> = emptySet()
+    val skippedLocation: Set<String> = emptySet(),
+    /** Each changed shopping list goes straight on to filled carts and real totals. */
+    val autoMode: Boolean = false,
+    /** In auto mode, empty each cart before filling it. */
+    val autoEmptyFirst: Boolean = false
 ) {
     companion object {
         val DEFAULT_SELECTED = setOf("blinkit", "zepto", "instamart")
@@ -75,6 +80,8 @@ class SettingsRepository(context: Context) {
         val DELIVERY_PLACE = stringPreferencesKey("deliveryPlace")
         val SKIPPED_LOGIN = stringSetPreferencesKey("skippedLogin")
         val SKIPPED_LOCATION = stringSetPreferencesKey("skippedLocation")
+        val AUTO_MODE = booleanPreferencesKey("autoMode")
+        val AUTO_EMPTY_FIRST = booleanPreferencesKey("autoEmptyFirst")
     }
 
     val settings: Flow<AppSettings> = dataStore.data
@@ -88,7 +95,9 @@ class SettingsRepository(context: Context) {
                 customProviders = CustomProviderCodec.decodeAll(prefs[Keys.CUSTOM_PROVIDERS] ?: emptySet()),
                 deliveryPlace = DeliveryPlace.decode(prefs[Keys.DELIVERY_PLACE]),
                 skippedLogin = prefs[Keys.SKIPPED_LOGIN] ?: emptySet(),
-                skippedLocation = prefs[Keys.SKIPPED_LOCATION] ?: emptySet()
+                skippedLocation = prefs[Keys.SKIPPED_LOCATION] ?: emptySet(),
+                autoMode = prefs[Keys.AUTO_MODE] ?: false,
+                autoEmptyFirst = prefs[Keys.AUTO_EMPTY_FIRST] ?: false
             )
         }
 
@@ -102,6 +111,8 @@ class SettingsRepository(context: Context) {
             if (place != null) prefs[Keys.DELIVERY_PLACE] = place.encode() else prefs.remove(Keys.DELIVERY_PLACE)
             prefs[Keys.SKIPPED_LOGIN] = settings.skippedLogin
             prefs[Keys.SKIPPED_LOCATION] = settings.skippedLocation
+            prefs[Keys.AUTO_MODE] = settings.autoMode
+            prefs[Keys.AUTO_EMPTY_FIRST] = settings.autoEmptyFirst
         }
     }
 }

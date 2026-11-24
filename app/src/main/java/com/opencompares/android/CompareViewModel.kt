@@ -26,6 +26,7 @@ import com.opencompares.android.prices.ComparisonParser
 import com.opencompares.android.prices.ComparisonPrompts
 import com.opencompares.android.prices.PaneReadResult
 import com.opencompares.android.prices.PriceReader
+import com.opencompares.android.shopping.AutoRun
 import com.opencompares.android.shopping.PaneDriver
 import com.opencompares.android.shopping.BasketResult
 import com.opencompares.android.shopping.ShoppingSession
@@ -324,6 +325,24 @@ class CompareViewModel(application: Application) : AndroidViewModel(application)
             val label = listOfNotNull(it.subLocality, it.locality, it.postalCode).distinct().joinToString(", ").ifEmpty { query }
             DeliveryPlace(label, it.latitude, it.longitude)
         }
+    }
+
+    val autoMode: Boolean get() = settings?.autoMode ?: false
+    val autoEmptyFirst: Boolean get() = settings?.autoEmptyFirst ?: false
+
+    fun setAutoMode(on: Boolean, emptyFirst: Boolean) {
+        val current = settings ?: return
+        saveSettings(current.copy(autoMode = on, autoEmptyFirst = emptyFirst))
+    }
+
+    /** Sends a chat message; in auto mode a changed list goes on to filled carts and real totals. */
+    fun sendShopping(store: PaneWebViewStore, text: String) {
+        val auto = if (autoMode) {
+            // Every pane must be on screen (under the chat) to load and render its pages.
+            fullScreenPane = null
+            AutoRun(paneDriver(store), autoEmptyFirst)
+        } else null
+        shopping.send(text, auto)
     }
 
     /** Searches every visible pane for each item on the shopping list. */

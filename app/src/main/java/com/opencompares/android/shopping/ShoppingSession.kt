@@ -62,8 +62,21 @@ sealed interface ShoppingWork {
     data class Searching(val itemName: String, val number: Int, val total: Int) : ShoppingWork
     data object Matching : ShoppingWork
     /** Putting items in a site's cart, or reading its bill. */
-    data class Carting(val siteName: String, val step: String, val number: Int, val total: Int) : ShoppingWork
+    data class Carting(
+        val siteName: String,
+        val step: String,
+        val number: Int,
+        val total: Int,
+        /** What every site is doing, for the line above the per-site steps. */
+        val title: String = "Filling carts"
+    ) : ShoppingWork
 }
+
+/**
+ * Auto mode: after a message changes the list, search, fill every site's cart and read the
+ * bills in one go. [emptyFirst] empties those carts before filling them.
+ */
+class AutoRun(val driver: PaneDriver, val emptyFirst: Boolean)
 
 /** Lets a shopping run search in the marketplace panes. */
 interface PaneDriver {
@@ -121,6 +134,9 @@ class ShoppingSession(
     private val pageCache = HashMap<String, CachedPage>()
     private val matchCache = HashMap<String, ItemMatch>()
 
+    /** What the app itself has put in site carts during this chat, so auto mode can undo it. */
+    private var owned = listOf<OwnedUnits>()
+
     /** Forget a site's saved results, e.g. after its login or address changed. */
     fun forgetSite(key: String) {
         pageCache.keys.removeAll { it.startsWith("$key|") }
@@ -130,24 +146,16 @@ class ShoppingSession(
         add { ChatEntry.FromAssistant(it, GREETING) }
     }
 
-    fun send(message: String) {
+    /** Has ChatGPT update the list from [message]; with [auto], goes on to fill the carts. */
+    fun send(message: String, auto: AutoRun? = null) {
         val text = message.trim()
         if (text.isEmpty() || work != ShoppingWork.Idle) return
         add { ChatEntry.FromUser(it, text) }
         work = ShoppingWork.Thinking
         job = scope.launch {
             try {
-                val reply = chatGpt.ask(ShoppingListPrompts.INSTRUCTIONS, ShoppingListPrompts.input(text, list))
-                if (debugLog) Log.d(TAG, "list reply: $reply")
-                val update = ShoppingListPrompts.parse(reply)
-                val (items, next) = ListDiff.assignIds(list, update.items, nextItemId)
-                nextItemId = next
-                val diff = ListDiff.between(list, items)
-                update.reply?.let { r -> add { ChatEntry.FromAssistant(it, r) } }
-                if (!diff.isEmpty && items.isNotEmpty()) {
-                    add { ChatEntry.ListCard(it, items, diff.takeIf { list.isNotEmpty() }) }
-                }
-                list = items
+                // A question or a reply that leaves the list as it was needs no new carts.
+                if (updateList(text) && list.isNotEmpty() && auto != null) runAuto(auto)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -158,69 +166,116 @@ class ShoppingSession(
         }
     }
 
-    fun findBestPrices(driver: PaneDriver) {
-        val items = list
-        if (work != ShoppingWork.Idle || items.isEmpty()) return
-        val sites = driver.siteKeys
+    /** Returns true if the list changed. */
+    private suspend fun updateList(text: String): Boolean {
+        val reply = chatGpt.ask(ShoppingListPrompts.INSTRUCTIONS, ShoppingListPrompts.input(text, list))
+        if (debugLog) Log.d(TAG, "list reply: $reply")
+        val update = ShoppingListPrompts.parse(reply)
+        val (items, next) = ListDiff.assignIds(list, update.items, nextItemId)
+        nextItemId = next
+        val diff = ListDiff.between(list, items)
+        update.reply?.let { r -> add { ChatEntry.FromAssistant(it, r) } }
+        val changed = !diff.isEmpty && items.isNotEmpty()
+        if (changed) add { ChatEntry.ListCard(it, items, diff.takeIf { list.isNotEmpty() }) }
+        list = items
+        return changed
+    }
+
+    /**
+     * Auto mode after the list changed: searches every site, then fills each site that has
+     * any of the items and reads its bill, without asking in between. Nothing is ordered.
+     */
+    private suspend fun runAuto(auto: AutoRun) {
+        val driver = auto.driver
+        val result = searchAll(driver) ?: return
+        val sites = result.sites.filter { it.found.isNotEmpty() }.map { it.providerKey }
         if (sites.isEmpty()) {
-            add { ChatEntry.FromAssistant(it, "No marketplaces are turned on. Pick some in the sites view first.", isError = true) }
+            add { ChatEntry.FromAssistant(it, "No site had any of your items, so no carts were filled.", isError = true) }
             return
         }
+        if (auto.emptyFirst) {
+            clearCarts(driver, sites, "Emptied the carts first:")
+        } else {
+            // Take back what the app put in earlier for items that are off the list or changed.
+            val removals = CartSync.removals(owned, result)
+            if (removals.isNotEmpty()) takeOutAll(driver, removals)
+        }
+        fill(driver, result, sites)
+    }
+
+    fun findBestPrices(driver: PaneDriver) {
+        if (work != ShoppingWork.Idle || list.isEmpty()) return
         job = scope.launch {
             try {
-                val now = System.currentTimeMillis()
-                pageCache.values.removeAll { now - it.atMillis > CACHE_MS }
-                // Only items with a site lacking fresh results are searched; the rest reuse them.
-                val toSearch = items.filter { item -> sites.any { pageCache[cacheKey(it, item.search)] == null } }
-                val searches = items.map { item ->
-                    val missing = sites.filter { pageCache[cacheKey(it, item.search)] == null }
-                    if (missing.isNotEmpty()) {
-                        work = ShoppingWork.Searching(item.name, toSearch.indexOf(item) + 1, toSearch.size)
-                        val fetched = coroutineScope {
-                            missing.map { key -> async { key to searchSite(driver, key, item.search) } }.awaitAll()
-                        }
-                        // A login wall is not a result worth keeping; try that site again next time.
-                        fetched.forEach { (key, page) ->
-                            if (page != null && !page.needsLogin && !page.needsLocation) pageCache[cacheKey(key, item.search)] = CachedPage(page, System.currentTimeMillis())
-                        }
-                        val fresh = fetched.toMap()
-                        ItemSearch(item, sites.mapNotNull { key -> fresh[key] ?: pageCache[cacheKey(key, item.search)]?.page })
-                    } else {
-                        ItemSearch(item, sites.mapNotNull { key -> pageCache[cacheKey(key, item.search)]?.page })
-                    }
-                }
-                val pagesBySite = searches.flatMap { it.pages }.groupBy { it.providerKey }
-                val needLogin = sites.filter { key -> pagesBySite[key]?.all { it.needsLogin } == true }
-                val needLocation = sites.filter { key -> pagesBySite[key]?.all { it.needsLocation } == true }
-                val noResults = sites.filter { key ->
-                    key !in needLogin && key !in needLocation && pagesBySite[key].orEmpty().all { it.offers.isEmpty() }
-                }
-
-                val matches = matchAll(searches, driver)
-                val used = sites.filter { it !in needLogin && it !in needLocation && it !in noResults }
-                val result = BasketResult.from(searches, matches, used)
-                val warnings = used.mapNotNull(driver::warning)
-                val reused = items.size - toSearch.size
-                val reusedNote = when {
-                    reused == 0 -> null
-                    toSearch.isEmpty() -> "Nothing changed that needed a new search, so these are the prices read earlier."
-                    else -> "Searched again only for ${toSearch.joinToString { it.name }}; the other $reused reused earlier results."
-                }
-                add {
-                    ChatEntry.ResultCard(
-                        it, result, needLogin.map(driver::siteName), noResults.map(driver::siteName),
-                        needLocation.map(driver::siteName), warnings, reusedNote
-                    )
-                }
-                hasResults = true
+                searchAll(driver)
             } catch (e: CancellationException) {
-                add { ChatEntry.FromAssistant(it, "Stopped.") }
                 throw e
             } catch (e: Exception) {
                 fail(e)
             } finally {
                 work = ShoppingWork.Idle
             }
+        }
+    }
+
+    /** Searches every site for the list and adds the prices card; null if it couldn't search. */
+    private suspend fun searchAll(driver: PaneDriver): BasketResult? {
+        val items = list
+        val sites = driver.siteKeys
+        if (sites.isEmpty()) {
+            add { ChatEntry.FromAssistant(it, "No marketplaces are turned on. Pick some in the sites view first.", isError = true) }
+            return null
+        }
+        try {
+            val now = System.currentTimeMillis()
+            pageCache.values.removeAll { now - it.atMillis > CACHE_MS }
+            // Only items with a site lacking fresh results are searched; the rest reuse them.
+            val toSearch = items.filter { item -> sites.any { pageCache[cacheKey(it, item.search)] == null } }
+            val searches = items.map { item ->
+                val missing = sites.filter { pageCache[cacheKey(it, item.search)] == null }
+                if (missing.isNotEmpty()) {
+                    work = ShoppingWork.Searching(item.name, toSearch.indexOf(item) + 1, toSearch.size)
+                    val fetched = coroutineScope {
+                        missing.map { key -> async { key to searchSite(driver, key, item.search) } }.awaitAll()
+                    }
+                    // A login wall is not a result worth keeping; try that site again next time.
+                    fetched.forEach { (key, page) ->
+                        if (page != null && !page.needsLogin && !page.needsLocation) pageCache[cacheKey(key, item.search)] = CachedPage(page, System.currentTimeMillis())
+                    }
+                    val fresh = fetched.toMap()
+                    ItemSearch(item, sites.mapNotNull { key -> fresh[key] ?: pageCache[cacheKey(key, item.search)]?.page })
+                } else {
+                    ItemSearch(item, sites.mapNotNull { key -> pageCache[cacheKey(key, item.search)]?.page })
+                }
+            }
+            val pagesBySite = searches.flatMap { it.pages }.groupBy { it.providerKey }
+            val needLogin = sites.filter { key -> pagesBySite[key]?.all { it.needsLogin } == true }
+            val needLocation = sites.filter { key -> pagesBySite[key]?.all { it.needsLocation } == true }
+            val noResults = sites.filter { key ->
+                key !in needLogin && key !in needLocation && pagesBySite[key].orEmpty().all { it.offers.isEmpty() }
+            }
+
+            val matches = matchAll(searches, driver)
+            val used = sites.filter { it !in needLogin && it !in needLocation && it !in noResults }
+            val result = BasketResult.from(searches, matches, used)
+            val warnings = used.mapNotNull(driver::warning)
+            val reused = items.size - toSearch.size
+            val reusedNote = when {
+                reused == 0 -> null
+                toSearch.isEmpty() -> "Nothing changed that needed a new search, so these are the prices read earlier."
+                else -> "Searched again only for ${toSearch.joinToString { it.name }}; the other $reused reused earlier results."
+            }
+            add {
+                ChatEntry.ResultCard(
+                    it, result, needLogin.map(driver::siteName), noResults.map(driver::siteName),
+                    needLocation.map(driver::siteName), warnings, reusedNote
+                )
+            }
+            hasResults = true
+            return result
+        } catch (e: CancellationException) {
+            add { ChatEntry.FromAssistant(it, "Stopped.") }
+            throw e
         }
     }
 
@@ -246,6 +301,7 @@ class ShoppingSession(
         list = emptyList()
         hasResults = false
         nextItemId = 1
+        owned = emptyList()
         work = ShoppingWork.Idle
         add { ChatEntry.FromAssistant(it, GREETING) }
     }
@@ -257,26 +313,9 @@ class ShoppingSession(
     fun fillCarts(driver: PaneDriver, result: BasketResult, siteKeys: List<String>) {
         if (work != ShoppingWork.Idle || siteKeys.isEmpty()) return
         job = scope.launch {
-            // Each site works in its own pane, so all of them fill at the same time.
-            val show = progressShower(driver)
-            val carts = java.util.Collections.synchronizedList(mutableListOf<SiteCart>())
             try {
-                val jobs = siteKeys.mapNotNull { site ->
-                    val options = result.items.mapNotNull { plan ->
-                        plan.options.firstOrNull { it.providerKey == site }?.let { plan.item to it }
-                    }
-                    if (options.isEmpty()) return@mapNotNull null
-                    show(site, "waiting")
-                    async { fillOne(driver, site, options) { step -> show(site, step) }.also { carts += it } }
-                }
-                jobs.awaitAll()
-                // Same order as the sites were listed, whichever finished first.
-                val ordered = siteKeys.mapNotNull { k -> carts.firstOrNull { it.providerKey == k } }
-                add { ChatEntry.CartCard(it, CartComparison(ordered, result)) }
+                fill(driver, result, siteKeys)
             } catch (e: CancellationException) {
-                val done = carts.toList()
-                if (done.isNotEmpty()) add { ChatEntry.CartCard(it, CartComparison(done, result)) }
-                add { ChatEntry.FromAssistant(it, "Stopped. Items already added stay in those carts.") }
                 throw e
             } catch (e: Exception) {
                 fail(e)
@@ -286,8 +325,36 @@ class ShoppingSession(
         }
     }
 
+    /** Fills the sites' carts at the same time, then adds the card with their bills. */
+    private suspend fun fill(driver: PaneDriver, result: BasketResult, siteKeys: List<String>) = coroutineScope {
+        // Each site works in its own pane, so all of them fill at the same time.
+        val show = progressShower(driver, "Filling carts")
+        val carts = java.util.Collections.synchronizedList(mutableListOf<SiteCart>())
+        try {
+            val jobs = siteKeys.mapNotNull { site ->
+                val options = result.items.mapNotNull { plan ->
+                    plan.options.firstOrNull { it.providerKey == site }?.let { plan.item to it }
+                }
+                if (options.isEmpty()) return@mapNotNull null
+                show(site, "waiting")
+                async { fillOne(driver, site, options) { step -> show(site, step) }.also { carts += it } }
+            }
+            jobs.awaitAll()
+            owned = CartSync.afterFill(owned, carts)
+            // Same order as the sites were listed, whichever finished first.
+            val ordered = siteKeys.mapNotNull { k -> carts.firstOrNull { it.providerKey == k } }
+            add { ChatEntry.CartCard(it, CartComparison(ordered, result)) }
+        } catch (e: CancellationException) {
+            val done = carts.toList()
+            owned = CartSync.afterFill(owned, done)
+            if (done.isNotEmpty()) add { ChatEntry.CartCard(it, CartComparison(done, result)) }
+            add { ChatEntry.FromAssistant(it, "Stopped. Items already added stay in those carts.") }
+            throw e
+        }
+    }
+
     /** Shows each site's step, one line per site, while sites work in their panes at once. */
-    private fun progressShower(driver: PaneDriver): (String, String) -> Unit {
+    private fun progressShower(driver: PaneDriver, title: String): (String, String) -> Unit {
         val progress = LinkedHashMap<String, String>()
         return { site, step ->
             progress[driver.siteName(site)] = step
@@ -295,7 +362,8 @@ class ShoppingSession(
                 siteName = "",
                 step = progress.entries.joinToString("\n") { (n, st) -> "$n: $st" },
                 number = progress.values.count { it == DONE_STEP },
-                total = progress.size
+                total = progress.size,
+                title = title
             )
         }
     }
@@ -307,21 +375,9 @@ class ShoppingSession(
     fun emptyCarts(driver: PaneDriver, siteKeys: List<String>) {
         if (work != ShoppingWork.Idle || siteKeys.isEmpty()) return
         job = scope.launch {
-            val show = progressShower(driver)
-            val done = java.util.Collections.synchronizedList(mutableListOf<EmptiedCart>())
-            fun report(title: String) {
-                val lines = siteKeys.mapNotNull { k -> done.firstOrNull { it.providerKey == k } }
-                    .joinToString("\n") { it.describe(driver.siteName(it.providerKey)) }
-                add { ChatEntry.FromAssistant(it, if (lines.isEmpty()) title else "$title\n$lines") }
-            }
             try {
-                siteKeys.map { site ->
-                    show(site, "waiting")
-                    async { clearCart(driver, site) { step -> show(site, step) }.also { done += it } }
-                }.awaitAll()
-                report("Carts:")
+                clearCarts(driver, siteKeys, "Carts:")
             } catch (e: CancellationException) {
-                report("Stopped emptying carts.")
                 throw e
             } catch (e: Exception) {
                 fail(e)
@@ -329,6 +385,72 @@ class ShoppingSession(
                 work = ShoppingWork.Idle
             }
         }
+    }
+
+    /** Empties the sites' carts at the same time, then says how each went under [title]. */
+    private suspend fun clearCarts(driver: PaneDriver, siteKeys: List<String>, title: String) = coroutineScope {
+        val show = progressShower(driver, "Emptying carts")
+        val done = java.util.Collections.synchronizedList(mutableListOf<EmptiedCart>())
+        fun report(heading: String) {
+            // The app's own units are gone with everything else.
+            owned = owned.filter { o -> done.none { it.providerKey == o.providerKey } }
+            val lines = siteKeys.mapNotNull { k -> done.firstOrNull { it.providerKey == k } }
+                .joinToString("\n") { it.describe(driver.siteName(it.providerKey)) }
+            add { ChatEntry.FromAssistant(it, if (lines.isEmpty()) heading else "$heading\n$lines") }
+        }
+        try {
+            siteKeys.map { site ->
+                show(site, "waiting")
+                async { clearCart(driver, site) { step -> show(site, step) }.also { done += it } }
+            }.awaitAll()
+            report(title)
+        } catch (e: CancellationException) {
+            report("Stopped emptying carts.")
+            throw e
+        }
+    }
+
+    /** Takes the given units out of each site's cart, all sites at once; see [CartSync.removals]. */
+    private suspend fun takeOutAll(driver: PaneDriver, removals: Map<String, List<Pair<Offer, Int>>>) = coroutineScope {
+        val show = progressShower(driver, "Taking out what's no longer on the list")
+        removals.map { (site, list) ->
+            show(site, "waiting")
+            async {
+                val removed = takeOut(driver, site, list) { step -> show(site, step) }
+                show(site, DONE_STEP)
+                if (removed == null) {
+                    add { ChatEntry.FromAssistant(it, "Couldn't open ${driver.siteName(site)}'s cart to take out what's no longer on the list.", isError = true) }
+                }
+            }
+        }.awaitAll()
+    }
+
+    /**
+     * Presses − on the cart page for each listing, as many times as given, and keeps the
+     * ledger of the app's own units up to date. Returns how many came out, or null without a cart page.
+     */
+    private suspend fun takeOut(driver: PaneDriver, site: String, list: List<Pair<Offer, Int>>, show: (String) -> Unit): Int? {
+        show("opening the cart")
+        if (!openCart(driver, site)) return null
+        var removed = 0
+        for ((offer, units) in list) {
+            show("removing ${offer.name.take(30)}")
+            // Cart pages draw their items a moment after loading: wait for this one.
+            for (attempt in 0 until MAX_READS) {
+                if (cardAction(driver, site, offer, "find", matchPrice = false)?.found == true) break
+                delay(READ_INTERVAL_MS)
+            }
+            var out = 0
+            repeat(units) {
+                val state = cardAction(driver, site, offer, "minus", matchPrice = false)
+                if (state?.found == true && state.count > 0) out++
+                delay(STEP_DELAY_MS)
+            }
+            owned = CartSync.afterRemoval(owned, site, offer.name, out)
+            removed += out
+        }
+        forgetSite(site)
+        return removed
     }
 
     /** Takes every item out of one site's cart, reporting each step through [show]. */
@@ -340,9 +462,11 @@ class ShoppingSession(
         var emptyReads = 0
         for (attempt in 0 until MAX_READS) {
             delay(READ_INTERVAL_MS)
+            val previous = lines
             lines = cartLines(driver, site, "lines")
-            if ((lines?.lines ?: 0) > 0) break
-            if (pageSaysEmpty(driver, site) && ++emptyReads >= 2) break
+            // Lines can draw one by one: wait until two reads in a row agree.
+            if ((lines?.lines ?: 0) > 0 && lines == previous) break
+            if ((lines?.lines ?: 0) == 0 && pageSaysEmpty(driver, site) && ++emptyReads >= 2) break
         }
         val start = lines?.units ?: 0
         if (start == 0) {
@@ -442,27 +566,13 @@ class ShoppingSession(
         val name = driver.siteName(cart.providerKey)
         job = scope.launch {
             try {
-                work = ShoppingWork.Carting(name, "opening the cart", 0, cart.items.size)
-                if (!openCart(driver, cart.providerKey)) {
+                val list = cart.items.filter { it.addedByApp > 0 }.map { it.offer to it.addedByApp }
+                val removed = takeOut(driver, cart.providerKey, list) { step -> work = ShoppingWork.Carting(name, step, 0, 0) }
+                if (removed == null) {
                     add { ChatEntry.FromAssistant(it, "Couldn't open $name's cart. Remove the items in its pane.", isError = true) }
                     return@launch
                 }
-                var removed = 0
-                cart.items.forEachIndexed { i, added ->
-                    work = ShoppingWork.Carting(name, "removing ${added.item.name}", i + 1, cart.items.size)
-                    // Cart pages draw their items a moment after loading: wait for this one.
-                    for (attempt in 0 until MAX_READS) {
-                        if (cardAction(driver, cart.providerKey, added.offer, "find", matchPrice = false)?.found == true) break
-                        delay(READ_INTERVAL_MS)
-                    }
-                    repeat(added.addedByApp) {
-                        val state = cardAction(driver, cart.providerKey, added.offer, "minus", matchPrice = false)
-                        if (state?.found == true && state.count > 0) removed++
-                        delay(STEP_DELAY_MS)
-                    }
-                }
                 add { ChatEntry.FromAssistant(it, "Took $removed item${if (removed == 1) "" else "s"} the app added out of $name's cart.") }
-                forgetSite(cart.providerKey)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -489,22 +599,35 @@ class ShoppingSession(
             return AddedItem(item, option.offer, option.packs, 0, 0, "Couldn't find it on the page any more.")
         }
         var state: CardState = first
+        // Some sites draw their cards before the buttons work (Flipkart): wait until they do.
+        var waits = 0
+        while (!state.live && waits++ < MAX_READS) {
+            delay(READ_INTERVAL_MS)
+            state = cardAction(driver, site, option.offer, "find") ?: state
+        }
+        // A page that never looks ready gets its presses anyway.
+        val force = !state.live
         val before = state.count
         if (state.count == 0) {
             if (!state.canAdd) {
                 val why = if (state.outOfStock) "Out of stock now." else "No ADD button on its card."
                 return AddedItem(item, option.offer, option.packs, 0, 0, why)
             }
-            cardAction(driver, site, option.offer, "add")
-            delay(STEP_DELAY_MS)
-            choosePack(driver, site, option.offer)
-            state = cardAction(driver, site, option.offer, "find") ?: state
-            // Some sites (Flipkart Minutes) show the new count a few seconds late, especially while
-            // other panes are busy too: look again before calling it a failure.
-            var checks = 0
-            while (state.count == 0 && checks++ < LATE_COUNT_CHECKS) {
+            // A page can redraw its list just as ADD is pressed (Flipkart), losing the press: after
+            // a long enough look at a count still at 0 with ADD still there, press once more.
+            for (attempt in 0 until ADD_ATTEMPTS) {
+                pressCard(driver, site, option.offer, "add", force)
                 delay(STEP_DELAY_MS)
+                choosePack(driver, site, option.offer)
                 state = cardAction(driver, site, option.offer, "find") ?: state
+                // Some sites (Flipkart Minutes) show the new count a few seconds late, especially while
+                // other panes are busy too: look again before calling it a failure.
+                var checks = 0
+                while (state.count == 0 && checks++ < LATE_COUNT_CHECKS) {
+                    delay(STEP_DELAY_MS)
+                    state = cardAction(driver, site, option.offer, "find") ?: state
+                }
+                if (state.count > 0 || !state.canAdd) break
             }
             if (state.count == 0) {
                 if (debugLog) Log.d(TAG, "$site cart: ${option.offer.name} ADD pressed but count stayed 0")
@@ -515,7 +638,7 @@ class ShoppingSession(
         var stuck = 0
         while (state.count < option.packs && state.canPlus && stuck < 2) {
             val was = state.count
-            cardAction(driver, site, option.offer, "plus")
+            pressCard(driver, site, option.offer, "plus", force)
             delay(STEP_DELAY_MS)
             choosePack(driver, site, option.offer)
             state = cardAction(driver, site, option.offer, "find") ?: state
@@ -524,6 +647,20 @@ class ShoppingSession(
         val problem = if (state.count < option.packs) "Only ${state.count} of ${option.packs} could be added; the site may limit how many." else null
         if (debugLog) Log.d(TAG, "$site cart: ${option.offer.name} ${state.count}/${option.packs}")
         return AddedItem(item, option.offer, option.packs, before, state.count, problem)
+    }
+
+    /**
+     * Presses ADD or + on a card. While the card isn't live yet the script presses nothing, so
+     * it is safe to try again; after a while it presses anyway.
+     */
+    private suspend fun pressCard(driver: PaneDriver, site: String, offer: Offer, mode: String, force: Boolean): CardState? {
+        var result = cardAction(driver, site, offer, mode, force = force)
+        var tries = 0
+        while (result != null && result.found && !result.live && tries++ < MAX_READS) {
+            delay(READ_INTERVAL_MS)
+            result = cardAction(driver, site, offer, mode, force = tries == MAX_READS)
+        }
+        return result
     }
 
     /**
@@ -539,12 +676,20 @@ class ShoppingSession(
         if (debugLog) Log.d(TAG, "$site cart: picked the ${formatRupees(offer.price)} pack of ${offer.name} (${pick.found})")
     }
 
-    private suspend fun cardAction(driver: PaneDriver, site: String, offer: Offer, mode: String, matchPrice: Boolean = true): CardState? {
+    private suspend fun cardAction(
+        driver: PaneDriver,
+        site: String,
+        offer: Offer,
+        mode: String,
+        matchPrice: Boolean = true,
+        force: Boolean = false
+    ): CardState? {
         val view = driver.view(site) ?: return null
         val args = JSONObject()
             .put("mode", mode)
             .put("name", offer.name)
             .put("price", if (matchPrice) formatRupees(offer.price) else "")
+            .put("force", force)
         val js = scripts.load(CART_SCRIPT).replace("__OC_ARGS__", args.toString())
         val raw = runPageScript(view, js) ?: return null
         return runCatching { CardState.parse(JSONObject(raw)) }.getOrNull()
@@ -689,6 +834,8 @@ class ShoppingSession(
         private const val STEP_DELAY_MS = 1_500L
         private const val DONE_STEP = "done"
         private const val LATE_COUNT_CHECKS = 3
+        /** Presses of ADD on one card, when an earlier press left no sign at all. */
+        private const val ADD_ATTEMPTS = 2
         /** Presses of − in a row that take nothing out before a site is given up on. */
         private const val MAX_STUCK_PRESSES = 3
         /** At most this many presses per site, so a page that never empties can't hold things up. */

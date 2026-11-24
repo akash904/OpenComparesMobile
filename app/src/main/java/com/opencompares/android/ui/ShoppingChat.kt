@@ -24,6 +24,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -32,7 +35,9 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -80,6 +85,11 @@ fun ShoppingChat(
     /** Asks to empty these sites' carts completely. */
     onEmptyCarts: (List<String>) -> Unit,
     cartCount: (String) -> Int?,
+    onSend: (String) -> Unit,
+    /** Auto mode: each changed list goes straight on to filled carts and real totals. */
+    autoMode: Boolean,
+    autoEmptyFirst: Boolean,
+    onAutoMode: (on: Boolean, emptyFirst: Boolean) -> Unit,
     modifier: Modifier = Modifier,
     /** Shown under the greeting: the shopper's sites and delivery location. */
     sitesCard: @Composable () -> Unit = {}
@@ -99,6 +109,18 @@ fun ShoppingChat(
                 onFillCarts(result, keys)
             },
             onDismiss = { confirming = null }
+        )
+    }
+    var autoSetup by remember { mutableStateOf(false) }
+    if (autoSetup) {
+        AutoModeDialog(
+            on = autoMode,
+            emptyFirst = autoEmptyFirst,
+            onSave = { on, emptyFirst ->
+                autoSetup = false
+                onAutoMode(on, emptyFirst)
+            },
+            onDismiss = { autoSetup = false }
         )
     }
     val lastListId = session.entries.lastOrNull { it is ChatEntry.ListCard }?.id
@@ -167,7 +189,80 @@ fun ShoppingChat(
                 }
             }
             HorizontalDivider()
-            MessageInput(enabled = signedIn && work == ShoppingWork.Idle, onSend = session::send)
+            AutoModeRow(autoMode, autoEmptyFirst, onClick = { autoSetup = true })
+            MessageInput(enabled = signedIn && work == ShoppingWork.Idle, autoMode = autoMode, onSend = onSend)
+        }
+    }
+}
+
+/** The auto mode switch above the message box, saying what sending will do. */
+@Composable
+private fun AutoModeRow(on: Boolean, emptyFirst: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(start = 12.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Auto mode", style = MaterialTheme.typography.labelLarge)
+            Text(
+                when {
+                    !on -> "Off: you check prices, then confirm before carts are filled."
+                    emptyFirst -> "On: your list goes straight to carts and real totals. Carts are emptied first."
+                    else -> "On: your list goes straight to carts and real totals."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Switch(checked = on, onCheckedChange = { onClick() })
+    }
+}
+
+/** Explains auto mode and asks what to do with carts that already have items. */
+@Composable
+private fun AutoModeDialog(on: Boolean, emptyFirst: Boolean, onSave: (on: Boolean, emptyFirst: Boolean) -> Unit, onDismiss: () -> Unit) {
+    var empty by remember { mutableStateOf(emptyFirst) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Auto mode") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    "Send your list and the app does the rest: it searches every site, puts the items in each site's cart " +
+                        "and reads the real bills with all charges, without asking in between. Nothing is ordered; you check out yourself.",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Spacer(Modifier.height(10.dp))
+                Text("If a site's cart already has other items:", style = MaterialTheme.typography.labelLarge)
+                ChoiceRow(
+                    selected = !empty,
+                    title = "Add to them",
+                    detail = "Your items stay. That site's bill includes them, so it isn't compared."
+                ) { empty = false }
+                ChoiceRow(
+                    selected = empty,
+                    title = "Empty the cart first",
+                    detail = "Takes everything out, including items you added on the site yourself."
+                ) { empty = true }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(true, empty) }) { Text(if (on) "Save" else "Turn on") }
+        },
+        dismissButton = {
+            if (on) TextButton(onClick = { onSave(false, empty) }) { Text("Turn off") }
+            else TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun ChoiceRow(selected: Boolean, title: String, detail: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 4.dp), verticalAlignment = Alignment.Top) {
+        RadioButton(selected = selected, onClick = onClick)
+        Column(Modifier.weight(1f).padding(top = 12.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyMedium)
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -265,7 +360,7 @@ private fun WorkRow(work: ShoppingWork, onStop: () -> Unit) {
         is ShoppingWork.Searching -> "Searching every site for ${work.itemName} (${work.number} of ${work.total})…"
         ShoppingWork.Matching -> "ChatGPT is matching products across sites…"
         is ShoppingWork.Carting -> if (work.siteName.isEmpty()) {
-            "Filling carts (${work.number} of ${work.total} done)\n${work.step}"
+            "${work.title} (${work.number} of ${work.total} done)\n${work.step}"
         } else {
             "${work.siteName}: ${work.step}" + if (work.number > 0) " (${work.number} of ${work.total})…" else "…"
         }
@@ -449,7 +544,7 @@ private fun OptionRow(option: ItemOption, isCheapest: Boolean, siteName: String,
 }
 
 @Composable
-private fun MessageInput(enabled: Boolean, onSend: (String) -> Unit) {
+private fun MessageInput(enabled: Boolean, autoMode: Boolean, onSend: (String) -> Unit) {
     var text by rememberSaveable { mutableStateOf("") }
     val send = {
         if (text.isNotBlank()) {
@@ -462,7 +557,7 @@ private fun MessageInput(enabled: Boolean, onSend: (String) -> Unit) {
             value = text,
             onValueChange = { text = it },
             modifier = Modifier.weight(1f),
-            placeholder = { Text("What do you want to buy?") },
+            placeholder = { Text(if (autoMode) "Your list, to fill carts with" else "What do you want to buy?") },
             enabled = enabled,
             maxLines = 4,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),

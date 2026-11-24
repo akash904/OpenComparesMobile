@@ -174,6 +174,14 @@ fun CartCard(
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
             )
         }
+        if (comparison.mixed.isNotEmpty()) {
+            val names = comparison.mixed.joinToString(" and ") { siteName(it.providerKey) }
+            Hint(
+                "$names had other items in the cart too, so " +
+                    (if (comparison.mixed.size == 1) "its bill isn't" else "their bills aren't") +
+                    " compared. Empty those carts first for a fair comparison."
+            )
+        }
         comparison.splitAtLeast?.let { split ->
             val text = if (comparison.splitNotWorthIt) {
                 "Splitting the order costs at least ${formatRupees(split)} with each site's charges, so it doesn't save money."
@@ -233,9 +241,9 @@ private fun SiteBill(
         bill.extra?.takeIf { it > 0.5 }?.let { Hint("Charges add ${formatRupees(it)} on top of the items.") }
         bill.freeDeliveryAbove?.let { Hint("Free delivery above ${formatRupees(it)}.") }
     }
-    cart.itemsBefore?.takeIf { it > 0 }?.let {
+    cart.otherItems.takeIf { it > 0 }?.let {
         Text(
-            "The cart already had $it item${if (it == 1) "" else "s"} before; they're in this bill too.",
+            "The cart already had $it other item${if (it == 1) "" else "s"}; they're in this bill too.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.error
         )

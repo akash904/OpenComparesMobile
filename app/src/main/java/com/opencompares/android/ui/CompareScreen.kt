@@ -425,6 +425,10 @@ fun CompareScreen(viewModel: CompareViewModel = viewModel()) {
                     onEmptyAdded = { cart -> viewModel.emptyAdded(store, cart) },
                     onEmptyCarts = { keys -> emptyChoice = keys },
                     cartCount = { key -> viewModel.siteStatus[key]?.cartCount },
+                    onSend = { text -> viewModel.sendShopping(store, text) },
+                    autoMode = viewModel.autoMode,
+                    autoEmptyFirst = viewModel.autoEmptyFirst,
+                    onAutoMode = viewModel::setAutoMode,
                     modifier = Modifier.fillMaxSize(),
                     sitesCard = sitesCard
                 )
