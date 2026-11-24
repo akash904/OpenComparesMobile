@@ -103,7 +103,11 @@ fun GridScrollbar(
                     .align(Alignment.TopCenter)
                     // Read the scroll position at layout time so scrolling skips recomposition.
                     .offset {
-                        val thumbTop = scrollState.value.toFloat() / scrollState.maxValue * thumbTravelPx()
+                        // Layout can run before recomposition drops the thumb, e.g. once fewer
+                        // panes stop the grid scrolling, so maxValue may already be 0 here.
+                        val max = scrollState.maxValue
+                        if (max <= 0 || max == Int.MAX_VALUE) return@offset IntOffset.Zero
+                        val thumbTop = scrollState.value.toFloat() / max * thumbTravelPx()
                         IntOffset(0, thumbTop.roundToInt())
                     }
                     .width(8.dp)
