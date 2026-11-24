@@ -120,9 +120,11 @@ fun MarketplacePane(
             }
 
             Box(Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp)) {
-                // A crashed WebView is gone; a new one is built when the user retries.
+                // A crashed WebView is gone; a new one is built when the user retries. The site is
+                // part of the key too: the fullscreen pane can switch sites in place, and must not
+                // keep showing the previous site's WebView.
                 if (pane.error?.kind != PaneError.Kind.Crashed) {
-                    key(pane.instanceId) {
+                    key(key, pane.instanceId) {
                         PaneWebViewHost(
                             provider = provider,
                             pane = pane,
