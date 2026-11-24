@@ -599,9 +599,10 @@ class ShoppingSession(
             return AddedItem(item, option.offer, option.packs, 0, 0, "Couldn't find it on the page any more.")
         }
         var state: CardState = first
-        // Some sites draw their cards before the buttons work (Flipkart): wait until they do.
+        // Some sites draw their cards before the buttons work, or before they show what's already
+        // in the cart (Flipkart): wait until they do.
         var waits = 0
-        while (!state.live && waits++ < MAX_READS) {
+        while (!state.live && waits++ < LIVE_WAIT_READS) {
             delay(READ_INTERVAL_MS)
             state = cardAction(driver, site, option.offer, "find") ?: state
         }
@@ -619,13 +620,13 @@ class ShoppingSession(
                 pressCard(driver, site, option.offer, "add", force)
                 delay(STEP_DELAY_MS)
                 choosePack(driver, site, option.offer)
-                state = cardAction(driver, site, option.offer, "find") ?: state
+                state = readCard(driver, site, option.offer, force) ?: state
                 // Some sites (Flipkart Minutes) show the new count a few seconds late, especially while
                 // other panes are busy too: look again before calling it a failure.
                 var checks = 0
                 while (state.count == 0 && checks++ < LATE_COUNT_CHECKS) {
                     delay(STEP_DELAY_MS)
-                    state = cardAction(driver, site, option.offer, "find") ?: state
+                    state = readCard(driver, site, option.offer, force) ?: state
                 }
                 if (state.count > 0 || !state.canAdd) break
             }
@@ -641,7 +642,7 @@ class ShoppingSession(
             pressCard(driver, site, option.offer, "plus", force)
             delay(STEP_DELAY_MS)
             choosePack(driver, site, option.offer)
-            state = cardAction(driver, site, option.offer, "find") ?: state
+            state = readCard(driver, site, option.offer, force) ?: state
             if (state.count <= was) stuck++ else stuck = 0
         }
         val problem = if (state.count < option.packs) "Only ${state.count} of ${option.packs} could be added; the site may limit how many." else null
@@ -661,6 +662,21 @@ class ShoppingSession(
             result = cardAction(driver, site, offer, mode, force = tries == MAX_READS)
         }
         return result
+    }
+
+    /**
+     * Reads a card's count after a press. A site can redraw its list just then (Flipkart), so the
+     * card can be missing or freshly drawn with a stale count for a moment: look again until it
+     * has settled.
+     */
+    private suspend fun readCard(driver: PaneDriver, site: String, offer: Offer, force: Boolean): CardState? {
+        var state = cardAction(driver, site, offer, "find", force = force)
+        var reads = 0
+        while ((state == null || !state.found || !state.live) && reads++ < MAX_READS) {
+            delay(READ_INTERVAL_MS)
+            state = cardAction(driver, site, offer, "find", force = force)
+        }
+        return state
     }
 
     /**
@@ -829,6 +845,8 @@ class ShoppingSession(
         private const val PAGE_LOAD_TIMEOUT_MS = 15_000L
         private const val READ_INTERVAL_MS = 1_500L
         private const val MAX_READS = 8
+        /** Reads while a card isn't live yet; Flipkart's list can take 15 s after loading to settle. */
+        private const val LIVE_WAIT_READS = 12
         private const val LOGIN_RETRY_DELAY_MS = 2_500L
         /** Time for a site to update after a tap on ADD, + or -. */
         private const val STEP_DELAY_MS = 1_500L

@@ -13,7 +13,7 @@
  * the first adds the row with the right price, the second closes the picker with Confirm. An empty price matches
  * any price, for cart pages that show line totals.
  * Returns: JSON string {found, live, count, canAdd, canPlus, outOfStock, cardText}; live is false
- * while the card's buttons don't work yet, and then nothing is pressed.
+ * while the card's buttons don't work or its count can't be trusted yet, and then nothing is pressed.
  */
 (function (args) {
   var ADD_RE = /^(?:add|add to cart|add to bag|\+ ?add|add ?\+)$/i;
@@ -79,6 +79,21 @@
       if (hasReactKey(e, "__reactProps")) return true;
     }
     return false;
+  }
+
+  // Flipkart draws its search list, then draws it again several seconds after loading, and only
+  // the second list shows what is already in the cart: until then a card in the cart can still
+  // say ADD, and the new cards fill in their counts a moment after they appear. There a card is
+  // trusted only a few seconds after that redraw has been seen (a card marked after loading has
+  // been replaced), or long enough after loading that it has surely passed.
+  var REDRAWS_LIST = /(^|\.)flipkart\.com$/.test(location.hostname) && /^\/search/.test(location.pathname);
+  var REDRAW_MS = 15000;
+  var AFTER_REDRAW_MS = 3000;
+  function settled() {
+    if (!REDRAWS_LIST) return true;
+    if (window.__ocRedrawnAt) return Date.now() - window.__ocRedrawnAt > AFTER_REDRAW_MS;
+    var loaded = performance.timing.loadEventEnd;
+    return loaded > 0 && Date.now() - loaded > REDRAW_MS;
   }
 
   function visibleText(el) {
@@ -450,8 +465,10 @@
   // A list can be drawn again just after it appears (Flipkart), replacing every card: only press
   // a card that an earlier run saw too, so it isn't about to be thrown away.
   var seen = card.hasAttribute("data-oc-seen");
+  if (!seen && window.__ocMarkedLoaded && !window.__ocRedrawnAt) window.__ocRedrawnAt = Date.now();
+  if (document.readyState === "complete") window.__ocMarkedLoaded = true;
   card.setAttribute("data-oc-seen", "1");
-  var ready = args.force || (seen && live(add || (step && (step.plus || step.minus))));
+  var ready = args.force || (seen && settled() && live(add || (step && (step.plus || step.minus))));
   if (ready) {
     if (args.mode === "add" && add) press(add);
     else if (args.mode === "plus" && step && step.plus) press(step.plus);
