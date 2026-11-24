@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -12,10 +14,23 @@ android {
         applicationId = "com.opencompares.android"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // The upload key's location and passwords live in keystore.properties, which git ignores.
+    // Without it, release builds are signed with the debug key and can't be uploaded to Play.
+    val keystoreFile = rootProject.file("keystore.properties")
+    val uploadKey = keystoreFile.takeIf { it.exists() }?.let { file ->
+        val props = Properties().apply { file.inputStream().use { load(it) } }
+        signingConfigs.create("upload") {
+            storeFile = file(props.getProperty("storeFile"))
+            storePassword = props.getProperty("storePassword")
+            keyAlias = props.getProperty("keyAlias")
+            keyPassword = props.getProperty("keyPassword")
+        }
     }
 
     buildTypes {
@@ -25,7 +40,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = uploadKey ?: signingConfigs.getByName("debug")
         }
         debug {
             // Installs next to the release app instead of clashing with its signature.

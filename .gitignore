@@ -11,6 +11,8 @@
 # Signing keys must never be committed.
 *.jks
 *.keystore
+# Holds the upload key's passwords; see keystore.properties.example.
+keystore.properties
 /build
 /captures
 .externalNativeBuild
